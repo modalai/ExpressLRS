@@ -820,11 +820,35 @@ RxConfig::SetDefaults(bool commit)
     if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
         m_config.antennaMode = 2; // 2 is diversity
 
-#if defined(GPIO_PIN_PWM_OUTPUTS)
-    for (unsigned int ch=0; ch<PWM_MAX_CHANNELS; ++ch)
-        SetPwmChannel(ch, 512, ch, false, 0, false);
-    SetPwmChannel(2, 0, 2, false, 0, false); // ch2 is throttle, failsafe it to 988
-#endif
+//#if defined(GPIO_PIN_PWM_OUTPUTS)
+//    for (unsigned int ch=0; ch<PWM_MAX_CHANNELS; ++ch)
+//        SetPwmChannel(ch, 512, ch, false, 0, false);
+//    SetPwmChannel(2, 0, 2, false, 0, false); // ch2 is throttle, failsafe it to 988
+//#endif
+
+    // PWM CH: 0
+    // Failsafe: 512
+    // Input Channel: 8 (0 based)
+    // Inverted: False
+    // Mode: 0 (som50Hz, see eServoOutputMode)
+    // Narrow: False
+    SetPwmChannel(0, 512, 7, false, 0, false);
+
+    // Digital IO CH: 1,
+    // Failsafe: 512
+    // Input Channel: 9 (0 based)
+    // Inverted: False
+    // Mode: 7 (somOnOff, see eServoOutputMode)
+    // Narrow: False
+    SetPwmChannel(1, 512, 5, false, somOnOff, false);
+
+    // Digial IO CH: 2
+    // Failsafe: 512
+    // Input Channel: 10 (0 based)
+    // Inverted: False
+    // Mode: 7 (somOnOff, see eServoOutputMode)
+    // Narrow: False
+    SetPwmChannel(2, 512, 6, false, somOnOff, false);
 
     if (commit)
     {
