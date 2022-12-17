@@ -825,30 +825,37 @@ RxConfig::SetDefaults(bool commit)
 //        SetPwmChannel(ch, 512, ch, false, 0, false);
 //    SetPwmChannel(2, 0, 2, false, 0, false); // ch2 is throttle, failsafe it to 988
 //#endif
+    // PWM CH: 0 --> GPIO pin 0 --> Silkscreen Pin 1 --> RC CH 7
+    // Failsafe: 512
+    // Input Channel: 7 (0 based)
+    // Inverted: False
+    // Mode: 0 (som50Hz, see eServoOutputMode)
+    // Narrow: False
+    SetPwmChannel(0, 512, 6, false, som50Hz, false);
 
-    // PWM CH: 0
+    // PWM CH: 1 --> GPIO pin 5 --> Silkscreen Pin 4 --> RC CH 12
+    // Failsafe: 512
+    // Input Channel: 12 (0 based)
+    // Inverted: False
+    // Mode: 0 (som50Hz, see eServoOutputMode)
+    // Narrow: False
+    SetPwmChannel(1, 512, 11, false, som50Hz, false);
+
+    // PWM CH: 2 --> GPIO pin 9 --> Silkscreen Pin 5 --> RC CH 8
     // Failsafe: 512
     // Input Channel: 8 (0 based)
     // Inverted: False
     // Mode: 0 (som50Hz, see eServoOutputMode)
     // Narrow: False
-    SetPwmChannel(0, 512, 7, false, 0, false);
+    SetPwmChannel(2, 512, 7, false, som50Hz, false);
 
-    // Digital IO CH: 1,
-    // Failsafe: 512
-    // Input Channel: 9 (0 based)
-    // Inverted: False
-    // Mode: 7 (somOnOff, see eServoOutputMode)
-    // Narrow: False
-    SetPwmChannel(1, 512, 5, false, somOnOff, false);
-
-    // Digial IO CH: 2
+    // PWM CH: 3 --> GPIO pin 10 --> Silkscreen Pin 6 --> RC CH 11
     // Failsafe: 512
     // Input Channel: 10 (0 based)
     // Inverted: False
-    // Mode: 7 (somOnOff, see eServoOutputMode)
+    // Mode: 0 (som50Hz, see eServoOutputMode)
     // Narrow: False
-    SetPwmChannel(2, 512, 6, false, somOnOff, false);
+    SetPwmChannel(3, 512, 10, false, som50Hz, false);
 
     if (commit)
     {
