@@ -63,15 +63,22 @@ static void servoWrite(uint8_t ch, uint16_t us)
 
 static void servosFailsafe()
 {
-    constexpr unsigned SERVO_FAILSAFE_MIN = 988U;
+
+    // Lower SERVO_FAILSAFE_MIN to 900us, 988us resulted in LED still being on at 1% brightness
+    // constexpr unsigned SERVO_FAILSAFE_MIN = 988U;
+    constexpr unsigned SERVO_FAILSAFE_MIN = 900U;
+
     for (unsigned ch = 0; ch < servoMgr->getOutputCnt(); ++ch)
     {
         const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
         // Note: Failsafe values do not respect the inverted flag, failsafes are absolute
-        uint16_t us = chConfig->val.failsafe + SERVO_FAILSAFE_MIN;
+        // uint16_t us = chConfig->val.failsafe + SERVO_FAILSAFE_MIN;
         // Always write the failsafe position even if the servo never has been started,
         // so all the servos go to their expected position
-        servoWrite(ch, us);
+        // servoWrite(ch, us);
+        
+        // Forcing failsafe mode for any switch position to be all lights OFF
+        servoWrite(ch, SERVO_FAILSAFE_MIN);
     }
 }
 
@@ -100,7 +107,15 @@ static int servosUpdate(unsigned long now)
             {
                 us = 3000U - us;
             }
-            servoWrite(ch, us);
+            
+            // Force true "OFF" mode for Overt LEDs and IR LEDs
+            if(us < 1050U){
+                servoWrite(ch,900U);
+            }
+            else
+            {
+                servoWrite(ch, us);
+            }
         } /* for each servo */
     }     /* if newChannelsAvailable */
 
