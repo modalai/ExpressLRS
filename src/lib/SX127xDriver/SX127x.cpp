@@ -116,6 +116,11 @@ void SX127xDriver::End()
 
 void SX127xDriver::ConfigLoraDefaults()
 {
+#if defined(M0139)
+  uint8_t tcxo = hal.readRegister(SX1276_REG_TCXO, SX12XX_Radio_All);
+  tcxo |= SX1276_REG_TCXO_ON;
+  hal.writeRegister(SX1276_REG_TCXO, tcxo, SX12XX_Radio_All);
+#endif
   hal.writeRegister(SX127X_REG_OP_MODE, SX127x_OPMODE_SLEEP, SX12XX_Radio_All);
   hal.writeRegister(SX127X_REG_OP_MODE, ModFSKorLoRa, SX12XX_Radio_All); //must be written in sleep mode
   SetMode(SX127x_OPMODE_STANDBY, SX12XX_Radio_All);

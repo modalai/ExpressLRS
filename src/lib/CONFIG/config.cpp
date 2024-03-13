@@ -927,7 +927,7 @@ RxConfig::SetDefaults(bool commit)
     if (GPIO_PIN_NSS_2 != UNDEF_PIN)
         m_config.antennaMode = 0; // 0 is diversity for dual radio
 
-#if defined(GPIO_PIN_PWM_OUTPUTS)
+#if defined(GPIO_PIN_PWM_OUTPUTS)  && !defined (M0139)
     for (unsigned int ch=0; ch<PWM_MAX_CHANNELS; ++ch)
         SetPwmChannel(ch, 512, ch, false, 0, false);
     SetPwmChannel(2, 0, 2, false, 0, false); // ch2 is throttle, failsafe it to 988

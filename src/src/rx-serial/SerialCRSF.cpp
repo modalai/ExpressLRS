@@ -4,8 +4,10 @@
 #include "telemetry.h"
 
 extern Telemetry telemetry;
+extern connectionState_e connectionState;
 extern void reset_into_bootloader();
 extern void EnterBindingMode();
+extern void EnterUnbindMode();
 extern void UpdateModelMatch(uint8_t model);
 
 void SerialCRSF::setLinkQualityStats(uint16_t lq, uint16_t rssi)
@@ -92,9 +94,13 @@ void SerialCRSF::processByte(uint8_t byte)
     {
         reset_into_bootloader();
     }
-    if (telemetry.ShouldCallEnterBind())
+    if (telemetry.ShouldCallEnterBind() && connectionState != connected)
     {
         EnterBindingMode();
+    }
+    if (telemetry.ShouldCallUnbind())
+    {
+        EnterUnbindMode();
     }
     if (telemetry.ShouldCallUpdateModelMatch())
     {

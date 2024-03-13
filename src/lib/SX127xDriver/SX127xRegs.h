@@ -305,3 +305,7 @@ typedef enum
 
 #define SPI_READ 0b00000000
 #define SPI_WRITE 0b10000000
+
+//SX1276 TXCO register
+#define SX1276_REG_TCXO 0x4B
+#define SX1276_REG_TCXO_ON 0x10

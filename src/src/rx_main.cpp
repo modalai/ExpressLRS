@@ -33,6 +33,7 @@
 #include "devSerialUpdate.h"
 #include "devBaro.h"
 #include "devMSPVTX.h"
+#include <SPI.h>
 
 #if defined(PLATFORM_ESP8266)
 #include <FS.h>
@@ -107,6 +108,11 @@ CROSSFIRE2MSP crsf2msp;
 MSP2CROSSFIRE msp2crsf;
 #endif
 
+// uint32_t loop_counter{0};
+// #if defined(M0139)
+// SPIClass SPI_2 = SPIClass();
+// #endif
+
 #if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
 unsigned long rebootTime = 0;
 extern bool webserverPreventAutoStart;
@@ -117,7 +123,7 @@ uint32_t serialBaud;
 /* SERIAL_PROTOCOL_TX is used by CRSF output */
 #if defined(TARGET_RX_FM30_MINI)
     HardwareSerial SERIAL_PROTOCOL_TX(USART2);
-#elif defined(TARGET_DIY_900_RX_STM32)
+#elif defined(TARGET_DIY_900_RX_STM32) || defined(M0139)
     HardwareSerial SERIAL_PROTOCOL_TX(USART1);
 #else
     #define SERIAL_PROTOCOL_TX Serial
@@ -131,7 +137,7 @@ SerialIO *serialIO;
 #elif defined(TARGET_R9SLIMPLUS_RX) /* !TARGET_R9SLIMPLUS_RX */
     #define SERIAL_PROTOCOL_RX CrsfRxSerial
     HardwareSerial CrsfRxSerial(USART3);
-#elif defined(TARGET_RX_FM30_MINI)
+#elif defined(TARGET_RX_FM30_MINI) || defined (M0139)
     #define SERIAL_PROTOCOL_RX SERIAL_PROTOCOL_TX
 #else
     #define SERIAL_PROTOCOL_RX Serial
@@ -217,6 +223,7 @@ static uint8_t debugRcvrLinkstatsFhssIdx;
 
 bool InBindingMode = false;
 bool InLoanBindingMode = false;
+bool InForceUnbindMode = false;
 bool returnModelFromLoan = false;
 static unsigned long loanBindTimeout = LOAN_BIND_TIMEOUT_DEFAULT;
 static unsigned long loadBindingStartedMs = 0;
@@ -399,6 +406,7 @@ bool ICACHE_RAM_ATTR HandleFHSS()
     uint8_t modresultTLM = (OtaNonce + 1) % ExpressLRS_currTlmDenom;
     if (modresultTLM != 0 || ExpressLRS_currTlmDenom == 1) // if we are about to send a tlm response don't bother going back to rx
     {
+        // DBGLN("HandleFHSS RXnb");
         Radio.RXnb();
     }
 #endif
@@ -608,6 +616,7 @@ void ICACHE_RAM_ATTR updatePhaseLock()
 
 void ICACHE_RAM_ATTR HWtimerCallbackTick() // this is 180 out of phase with the other callback, occurs mid-packet reception
 {
+    // DBGLN("HWtimerCallbackTick");
     updatePhaseLock();
     OtaNonce++;
 
@@ -658,7 +667,7 @@ static inline void switchAntenna()
 
 static void ICACHE_RAM_ATTR updateDiversity()
 {
-
+    // DBGLN("Updating Diversity, antenna mode: %u", config.GetAntennaMode());
     if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
     {
         if(config.GetAntennaMode() == 2)
@@ -674,12 +683,14 @@ static void ICACHE_RAM_ATTR updateDiversity()
             //if rssi dropped by the amount of DIVERSITY_ANTENNA_RSSI_TRIGGER
             if ((rssi < (prevRSSI - DIVERSITY_ANTENNA_RSSI_TRIGGER)) && antennaRSSIDropTrigger >= DIVERSITY_ANTENNA_INTERVAL)
             {
+                DBGLN("rssi dropped by the amount of DIVERSITY_ANTENNA_RSSI_TRIGGER. Switching antennas, current antenna:%u", antenna);
                 switchAntenna();
                 antennaLQDropTrigger = 1;
                 antennaRSSIDropTrigger = 0;
             }
             else if (rssi > prevRSSI || antennaRSSIDropTrigger < DIVERSITY_ANTENNA_INTERVAL)
             {
+                DBGLN("Update Diversity: Staying on antenna:%u",antenna);
                 prevRSSI = rssi;
                 antennaRSSIDropTrigger++;
             }
@@ -687,6 +698,7 @@ static void ICACHE_RAM_ATTR updateDiversity()
             // if we didn't get a packet switch the antenna
             if (!LQCalc.currentIsSet() && antennaLQDropTrigger == 0)
             {
+                DBGLN("Didn't get a packet: Switching antennas, current antenna:%u", antenna);
                 switchAntenna();
                 antennaLQDropTrigger = 1;
                 antennaRSSIDropTrigger = 0;
@@ -697,6 +709,7 @@ static void ICACHE_RAM_ATTR updateDiversity()
                 // We can compare the rssi values and see if we made things better or worse when we switched
                 if (rssi < otherRSSI)
                 {
+                    DBGLN("RSSI worse on other antenna: Switching antennas, current antenna:%u", antenna);
                     // things got worse when we switched, so change back.
                     switchAntenna();
                     antennaLQDropTrigger = 1;
@@ -727,6 +740,7 @@ static void ICACHE_RAM_ATTR updateDiversity()
 
 void ICACHE_RAM_ATTR HWtimerCallbackTock()
 {
+    // DBGLN("HWtimerCallbackTock");
     if (tlmSent && Radio.GetLastTransmitRadio() == SX12XX_Radio_NONE)
     {
         Radio.TXdoneCallback();
@@ -788,6 +802,7 @@ void LostConnection(bool resumeRx)
         // If not resumRx, Radio will be left in SX127x_OPMODE_STANDBY / SX1280_MODE_STDBY_XOSC
         if (resumeRx)
         {
+            DBGLN("LostConnection RXnb");
             Radio.RXnb();
         }
     }
@@ -864,6 +879,7 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC(OTA_Packet_s const * const otaPkt
 
 static void ICACHE_RAM_ATTR ProcessRfPacket_MSP(OTA_Packet_s const * const otaPktPtr)
 {
+    DBGLN("Proccessing RF Packet MSP\n");
     uint8_t packageIndex;
     uint8_t const * payload;
     uint8_t dataLen;
@@ -988,6 +1004,7 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
 
 bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
 {
+    DBGLN("Processing RF Packet");
     if (status != SX12xxDriverCommon::SX12XX_RX_OK)
     {
         DBGVLN("HW CRC error");
@@ -1024,6 +1041,7 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
         ProcessRfPacket_MSP(otaPktPtr);
         break;
     case PACKET_TYPE_SYNC: //sync packet from master
+        DBGLN("Got Sync Packet");
         doStartTimer = ProcessRfPacket_SYNC(now,
             OtaIsFullRes ? &otaPktPtr->full.sync.sync : &otaPktPtr->std.sync)
             && !InBindingMode;
@@ -1068,6 +1086,7 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
 
 bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 {
+    // DBGLN("RXdoneISR");
     if (LQCalc.currentIsSet() && connectionState == connected)
     {
         return false; // Already received a packet, do not run ProcessRFPacket() again.
@@ -1083,9 +1102,11 @@ bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 
 void ICACHE_RAM_ATTR TXdoneISR()
 {
+    // DBGLN("TXdoneISR");
 #if defined(Regulatory_Domain_EU_CE_2400)
     BeginClearChannelAssessment();
 #else
+    // DBGLN("TXdoneISR RXnb");
     Radio.RXnb();
 #endif
 #if defined(DEBUG_RX_SCOREBOARD)
@@ -1232,7 +1253,7 @@ static void setupSerial()
     }
 #endif
 
-#if defined(TARGET_RX_FM30_MINI) || defined(TARGET_DIY_900_RX_STM32)
+#if defined(TARGET_RX_FM30_MINI) || defined(TARGET_DIY_900_RX_STM32) || defined(M0139)
     Serial.setRx(GPIO_PIN_DEBUG_RX);
     Serial.setTx(GPIO_PIN_DEBUG_TX);
     Serial.begin(serialBaud); // Same baud as CRSF for simplicity
@@ -1427,6 +1448,7 @@ static void cycleRfMode(unsigned long now)
         LQCalcDVDA.reset();
         // Display the current air rate to the user as an indicator something is happening
         scanIndex++;
+        // DBGLN("CycleRFMode RXnb");
         Radio.RXnb();
         DBGLN("%u", ExpressLRS_currAirRate_Modparams->interval);
 
@@ -1440,7 +1462,7 @@ static void updateBindingMode(unsigned long now)
 #ifndef MY_UID
     // If the eeprom is indicating that we're not bound
     // and we're not already in binding mode, enter binding
-    if (!config.GetIsBound() && !InBindingMode)
+    if (!config.GetIsBound() && !InBindingMode && !InForceUnbindMode)
     {
         DBGLN("RX has not been bound, enter binding mode...");
         EnterBindingMode();
@@ -1452,15 +1474,18 @@ static void updateBindingMode(unsigned long now)
     }
     // If in "loan" binding mode and the bind packet has come in, leave binding mode
     else if (InBindingMode && InLoanBindingMode && config.GetOnLoan()) {
+        DBGLN("If in 'loan' binding mode and the bind packet has come in, leave binding mode");
         ExitBindingMode();
     }
     // If in binding mode and the bind packet has come in, leave binding mode
     else if (InBindingMode && !InLoanBindingMode && config.GetIsBound())
     {
+        DBGLN("If in binding mode and the bind packet has come in, leave binding mode");
         ExitBindingMode();
     }
     // If in "loan" binding mode and we've been here for more than timeout period, reset UID and leave binding mode
     else if (InBindingMode && InLoanBindingMode && (now - loadBindingStartedMs) > loanBindTimeout) {
+        DBGLN("If in 'loan' binding mode and we've been here for more than timeout period, reset UID and leave binding mode");
         loanBindTimeout = LOAN_BIND_TIMEOUT_DEFAULT;
         memcpy(UID, MasterUID, sizeof(MasterUID));
         setupBindingFromConfig();
@@ -1468,6 +1493,7 @@ static void updateBindingMode(unsigned long now)
     }
     // If returning the model to the owner, set the flag and call ExitBindingMode to reset the CRC and FHSS
     else if (returnModelFromLoan && config.GetOnLoan()) {
+        DBGLN("If returning the model to the owner, set the flag and call ExitBindingMode to reset the CRC and FHSS");
         LostConnection(false);
         config.SetOnLoan(false);
         memcpy(UID, MasterUID, sizeof(MasterUID));
@@ -1596,6 +1622,7 @@ static void CheckConfigChangePending()
 #if defined(Regulatory_Domain_EU_CE_2400)
         LBTEnabled = (config.GetPower() > PWR_10mW);
 #endif
+        // DBGLN("CheckConfigChangePending RXnb");
         Radio.RXnb();
     }
 }
@@ -1634,6 +1661,11 @@ void resetConfigAndReboot()
 
 void setup()
 {
+
+    #if defined(FRSKY_R9MM) || defined(M0139)
+    __enable_irq();
+    #endif
+
     #if defined(TARGET_UNIFIED_RX)
     hardwareConfigured = options_init();
     if (!hardwareConfigured)
@@ -1670,6 +1702,12 @@ void setup()
 
         // Init EEPROM and load config, checking powerup count
         setupConfigAndPocCheck();
+        
+        // Setup Antenna mode to be 2 (Diversity)
+        // #if defined(M0139)
+        // config.SetAntennaMode(2);
+        // config.Commit();
+        // #endif
         #if defined(OPT_HAS_SERVO_OUTPUT)
         // If serial is not already defined, then see if there is serial pin configured in the PWM configuration
         if (GPIO_PIN_RCSIGNAL_RX == UNDEF_PIN && GPIO_PIN_RCSIGNAL_TX == UNDEF_PIN)
@@ -1707,6 +1745,7 @@ void setup()
             hwTimer.callbackTick = &HWtimerCallbackTick;
 
             MspReceiver.SetDataToReceive(MspData, ELRS_MSP_BUFFER);
+            // DBGLN("Setup RXnb");
             Radio.RXnb();
             hwTimer.init();
         }
@@ -1722,6 +1761,11 @@ void setup()
 
 void loop()
 {
+
+    // DBGLN("Anetnna mode:%u\n", config.GetAntennaMode());
+    // loop_counter++;
+    // if (loop_counter%1000 == 0) {DBGLN("Loop Counter:%lu\n", loop_counter);}
+
     unsigned long now = millis();
 
     if (MspReceiver.HasFinishedData())
@@ -1835,6 +1879,7 @@ void reset_into_bootloader(void)
 
 void EnterBindingMode()
 {
+    InForceUnbindMode = false;
     if (InLoanBindingMode)
     {
         loadBindingStartedMs = millis();
@@ -1869,9 +1914,20 @@ void EnterBindingMode()
         Radio.SetFrequencyReg(FHSSgetInitialGeminiFreq(), SX12XX_Radio_2);
     }
     // If the Radio Params (including InvertIQ) parameter changed, need to restart RX to take effect
+    DBGLN("Enter Bind Mode RXnb");
     Radio.RXnb();
 
     DBGLN("Entered binding mode at freq = %d", Radio.currFreq);
+    devicesTriggerEvent();
+}
+
+void EnterUnbindMode()
+{
+    DBGLN("Received Unbind command");
+    InForceUnbindMode = true;
+    config.SetIsBound(false);
+    LostConnection(true);
+    memcpy(UID, MasterUID, sizeof(UID));
     devicesTriggerEvent();
 }
 

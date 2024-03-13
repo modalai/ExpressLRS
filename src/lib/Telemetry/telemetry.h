@@ -55,6 +55,7 @@ public:
     void ResetState();
     bool ShouldCallBootloader();
     bool ShouldCallEnterBind();
+    bool ShouldCallUnbind();
     bool ShouldCallUpdateModelMatch();
     bool ShouldSendDeviceFrame();
     void CheckCrsfBatterySensorDetected();
@@ -74,6 +75,7 @@ private:
     uint8_t receivedPackages;
     bool callBootloader;
     bool callEnterBind;
+    bool callUnbind;
     bool callUpdateModelMatch;
     bool sendDeviceFrame;
     bool crsfBatterySensorDetected;

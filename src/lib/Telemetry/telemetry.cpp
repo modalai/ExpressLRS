@@ -40,6 +40,13 @@ bool Telemetry::ShouldCallEnterBind()
     return enterBind;
 }
 
+bool Telemetry::ShouldCallUnbind()
+{
+    bool enterUnbind = callUnbind;
+    callUnbind = false;
+    return enterUnbind;
+}
+
 bool Telemetry::ShouldCallUpdateModelMatch()
 {
     bool updateModelMatch = callUpdateModelMatch;
@@ -223,6 +230,11 @@ bool Telemetry::AppendTelemetryPackage(uint8_t *package)
     if (header->type == CRSF_FRAMETYPE_COMMAND && package[3] == 'b' && package[4] == 'd')
     {
         callEnterBind = true;
+        return true;
+    }
+    if (header->type == CRSF_FRAMETYPE_COMMAND && package[3] == 'u' && package[4] == 'b')
+    {
+        callUnbind = true;
         return true;
     }
     if (header->type == CRSF_FRAMETYPE_COMMAND && package[3] == 'm' && package[4] == 'm')
