@@ -1,4 +1,4 @@
-#if defined(PLATFORM_ESP32) || defined(PLATFORM_ESP8266)
+#if defined(PLATFORM_ESP32) || defined(PLATFORM_ESP8266) || defined (M0139)
 #pragma once
 
 #include <Arduino.h>
@@ -28,6 +28,7 @@ public:
     inline uint8_t getOutputCnt() const { return _outputCnt; }
 
     static const uint8_t PIN_DISCONNECTED = 0xff;
+    static const uint8_t PIN_AVAILABLE = 0xfe;
 
 private:
 #if defined(PLATFORM_ESP32)

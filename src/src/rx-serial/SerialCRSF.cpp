@@ -2,13 +2,24 @@
 #include "CRSF.h"
 #include "device.h"
 #include "telemetry.h"
+#include "logging.h"
 
 extern Telemetry telemetry;
+extern device_t ServoOut_device;
 extern connectionState_e connectionState;
 extern void reset_into_bootloader();
 extern void EnterBindingMode();
 extern void EnterUnbindMode();
 extern void UpdateModelMatch(uint8_t model);
+
+// M0139 PWM config via Serial
+bool updatePWM = false;
+uint8_t pwmPin{0};
+uint8_t pwmCmd{0};
+uint8_t pwmOutputChannel{0};
+uint8_t pwmInputChannel{0};
+uint8_t pwmType{0}; 
+uint16_t pwmValue{0};
 
 void SerialCRSF::setLinkQualityStats(uint16_t lq, uint16_t rssi)
 {
@@ -101,6 +112,20 @@ void SerialCRSF::processByte(uint8_t byte)
     if (telemetry.ShouldCallUnbind())
     {
         EnterUnbindMode();
+    }
+    if (telemetry.ShouldCallUpdatePWM()){
+        DBGLN("Received Update PWM command");
+        updatePWM = true;
+        pwmPin = telemetry.GetPwmPin();
+        pwmCmd = telemetry.GetPwmCmd();
+        pwmOutputChannel = telemetry.GetPwmChannel();
+        pwmInputChannel = telemetry.GetPwmInputChannel();
+        pwmType = telemetry.GetPwmType();
+        pwmValue = telemetry.GetPwmValue();
+        DBGLN("Pwm Pin: %u\tPwm Cmd: %u", pwmPin, pwmCmd);
+        DBGLN("Input Ch: %u\tOutput Ch: %u", pwmInputChannel, pwmOutputChannel);
+        DBGLN("Pwm Type: %s\tPwm Val: %u", pwmType, pwmValue);
+        ServoOut_device.event();
     }
     if (telemetry.ShouldCallUpdateModelMatch())
     {

@@ -44,10 +44,11 @@ https://github.com/jaxxzer
 #define POWER_OUTPUT_FIXED 127 //MAX power for 900 RXes
 
 // External pads
-// #define Ch1    PB0     // TIM3 CH3
-// #define Ch2    PB1     // TIM3 CH4 
-// #define Ch3    PA8     // TIM1 CH1 
-// #define Ch4    PA11    // TIM1 CH4 
+#define GPIO_PIN_PWM_OUTPUTS_COUNT 4
+#define Ch1    PB0     // TIM3 CH3
+#define Ch2    PB1     // TIM3 CH4 
+#define Ch3    PA8     // TIM1 CH1 
+#define Ch4    PA11    // TIM1 CH4 
 
 #define M0139
 #define SYSCLK_FREQ_72MHz

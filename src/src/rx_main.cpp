@@ -113,7 +113,7 @@ MSP2CROSSFIRE msp2crsf;
 // SPIClass SPI_2 = SPIClass();
 // #endif
 
-#if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
+#if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32) || defined(M0139)
 unsigned long rebootTime = 0;
 extern bool webserverPreventAutoStart;
 bool pwmSerialDefined = false;

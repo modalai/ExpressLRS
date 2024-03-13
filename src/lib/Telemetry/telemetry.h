@@ -10,6 +10,14 @@ enum CustomTelemSubTypeID : uint8_t {
     CRSF_AP_CUSTOM_TELEM_MULTI_PACKET_PASSTHROUGH = 0xF2,
 };
 
+enum PWM : uint8_t {
+    SET_PWM_CH = 0xF3,
+    SET_PWM_VAL = 0xF4,
+    SET_PWM_MICRO = 0xF5,
+    SET_PWM_DUTY = 0xF6,
+    SET_PWM_DEFAULT = 0xFF
+};
+
 typedef enum {
     TELEMETRY_IDLE = 0,
     RECEIVING_LENGTH,
@@ -56,6 +64,7 @@ public:
     bool ShouldCallBootloader();
     bool ShouldCallEnterBind();
     bool ShouldCallUnbind();
+    bool ShouldCallUpdatePWM();
     bool ShouldCallUpdateModelMatch();
     bool ShouldSendDeviceFrame();
     void CheckCrsfBatterySensorDetected();
@@ -65,6 +74,12 @@ public:
     uint8_t UpdatedPayloadCount();
     uint8_t ReceivedPackagesCount();
     bool AppendTelemetryPackage(uint8_t *package);
+    uint8_t GetPwmCmd(){ return pwmCmd;}
+    uint8_t GetPwmPin(){ return pwmPin;}
+    uint8_t GetPwmType(){ return pwmType;}
+    uint8_t GetPwmChannel(){ return pwmOutputChannel;}
+    uint8_t GetPwmInputChannel(){ return pwmInputChannel;}
+    uint16_t GetPwmValue(){ return pwmValue;}
 private:
     void AppendToPackage(volatile crsf_telemetry_package_t *current);
     uint8_t CRSFinBuffer[CRSF_MAX_PACKET_LEN];
@@ -77,7 +92,14 @@ private:
     bool callEnterBind;
     bool callUnbind;
     bool callUpdateModelMatch;
+    bool callUpdatePWM;
     bool sendDeviceFrame;
     bool crsfBatterySensorDetected;
     uint8_t modelMatchId;
+    uint8_t pwmCmd;
+    uint8_t pwmPin;
+    uint8_t pwmType;
+    uint8_t pwmOutputChannel;
+    uint16_t pwmInputChannel;
+    uint16_t pwmValue;
 };

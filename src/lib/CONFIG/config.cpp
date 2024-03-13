@@ -5,6 +5,7 @@
 #include "OTA.h"
 #include "helpers.h"
 #include "logging.h"
+bool currentPwmConfig{false};
 
 #if defined(TARGET_TX)
 
@@ -691,9 +692,10 @@ void RxConfig::Load()
     DBGLN("Config version %u", version);
 
     // If version is current, all done
-    if (version == RX_CONFIG_VERSION)
+    if (version == RX_CONFIG_VERSION){
+        currentPwmConfig = true;
         return;
-
+    }
     // Can't upgrade from version <4, or when flashing a previous version, just use defaults.
     if (version < 4 || version > RX_CONFIG_VERSION)
     {
@@ -955,7 +957,7 @@ RxConfig::SetStorageProvider(ELRS_EEPROM *eeprom)
     }
 }
 
-#if defined(GPIO_PIN_PWM_OUTPUTS)
+#if defined(GPIO_PIN_PWM_OUTPUTS) || defined (M0139)
 void
 RxConfig::SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, bool narrow)
 {
