@@ -118,11 +118,11 @@ void ServoMgr::allocateLedcChn(uint8_t ch, uint16_t intervalUs, uint8_t pin)
         if (_timerConfigs[timer_idx] == target_freq)
         {
             ledcAttachPinEx(pin, ch, (ledc_timer_t)i);
-            DBGLN("allocate ledc_ch %d on pin %d using group: %d, ledc_tim: %d, bits: %d", ch, pin, group, i, _resolution_bits[ch]);
+            // DBGLN("allocate ledc_ch %d on pin %d using group: %d, ledc_tim: %d, bits: %d", ch, pin, group, i, _resolution_bits[ch]);
             return;
         }
     }
-    DBGLN("Could not allocate timer for channel %d", ch);
+    // DBGLN("Could not allocate timer for channel %d", ch);
 }
 #endif
 
@@ -132,11 +132,11 @@ void ServoMgr::initialize()
     /* Init GPIOs, TIM1, TIM3*/
     
     if (!servoInitialized){
-        DBGLN("Initializing PWMs BEGIN");
+        // DBGLN("Initializing PWMs BEGIN");
         GPIO_Init();
         TIM1_Init();
         TIM3_Init();
-        DBGLN("Initializing PWMs DONE");
+        // DBGLN("Initializing PWMs DONE");
     }
 
     /* Start PWM on each CH at 0us so LEDs on LED Bar are all off */
@@ -146,49 +146,49 @@ void ServoMgr::initialize()
         if (pin == PIN_AVAILABLE){
             for (int channel = 0; channel < _outputCnt; ++channel){
                 if (_pins[channel] == PIN_AVAILABLE){
-                DBGLN("Setting %u LOW", GPIO_PIN_PWM_OUTPUTS[channel]);
+                // DBGLN("Setting %u LOW", GPIO_PIN_PWM_OUTPUTS[channel]);
                 // digitalWrite(pin, LOW);
                 digitalWrite(GPIO_PIN_PWM_OUTPUTS[channel], LOW);
                     } 
             }
             continue;
         } else{
-            DBGLN("_pin[ch:%u] UNAVAILABLE: %u", ch, pin);
+            // DBGLN("_pin[ch:%u] UNAVAILABLE: %u", ch, pin);
         }
 
         if (pin != PIN_DISCONNECTED && pin != PIN_AVAILABLE)
         {
             switch(pin){
                 case Ch1:
-                    DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
+                    // DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
                     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
                     __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, 0);  // ALL LEDs OFF
                     break;
                 
                 case Ch2:
-                    DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
+                    // DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
                     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
                     __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, 0);  // ALL LEDs OFF
                     break;
 
                 case Ch3:
-                    DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
+                    // DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
                     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
                     __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, 0);  // ALL LEDs OFF
                     break;
                 
                 case Ch4:
-                    DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
+                    // DBGLN("Starting PWM on: _pins[%u] %u", ch, pin);
                     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
                     __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, 0);  // ALL LEDs OFF
                     break;
 
                 default:
-                    DBGLN("Trying to start Undefined pin: _pins[%u] %u", ch, pin);
+                    // DBGLN("Trying to start Undefined pin: _pins[%u] %u", ch, pin);
                     break;
             }
         } else {
-            DBGLN("_pins[%u] %u DISCONNECTED", ch, pin);
+            // DBGLN("_pins[%u] %u DISCONNECTED", ch, pin);
         }
     }
 #elif defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
@@ -207,7 +207,7 @@ void ServoMgr::initialize()
 void ServoMgr::writeMicroseconds(uint8_t ch, uint16_t valueUs)
 {
     const uint8_t pin = _pins[ch];
-    DBGLN("WRITE MICROSECONDS. CH:%u\tPIN:%u\tACTIVE_CHANNELS:%u", ch, pin, _activePwmChannels);
+    // DBGLN("WRITE MICROSECONDS. CH:%u\tPIN:%u\tACTIVE_CHANNELS:%u", ch, pin, _activePwmChannels);
     if (pin == PIN_DISCONNECTED)
     {
         return;
@@ -219,7 +219,7 @@ void ServoMgr::writeMicroseconds(uint8_t ch, uint16_t valueUs)
     startWaveform8266(pin, valueUs, _refreshInterval[ch] - valueUs);
 #elif defined(M0139)
     uint16_t mappedValue = 0;
-    DBGLN("Updating PWM on: _pins[%u] %u", ch, pin);
+    // DBGLN("Updating PWM on: _pins[%u] %u", ch, pin);
     switch(pin){
         case Ch1:
             mappedValue = map(valueUs, 0, 2100, 0, htim3.Init.Period);

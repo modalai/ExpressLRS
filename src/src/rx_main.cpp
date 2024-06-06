@@ -108,10 +108,10 @@ CROSSFIRE2MSP crsf2msp;
 MSP2CROSSFIRE msp2crsf;
 #endif
 
-// uint32_t loop_counter{0};
-// #if defined(M0139)
-// SPIClass SPI_2 = SPIClass();
-// #endif
+uint32_t loop_counter{0};
+#if defined(M0139)
+SPIClass SPI_2 = SPIClass();
+#endif
 
 #if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32) || defined(M0139)
 unsigned long rebootTime = 0;
@@ -243,6 +243,7 @@ static inline void checkGeminiMode()
 {
     if (isDualRadio())
     {
+        DBGLN("Using Dual Radio!");
         geminiMode = config.GetAntennaMode();
     }
 }
@@ -385,13 +386,16 @@ bool ICACHE_RAM_ATTR HandleFHSS()
 
     if (geminiMode)
     {
+        DBGLN("HandleFHSS: gemini mode");
         if (((OtaNonce + 1)/ExpressLRS_currAirRate_Modparams->FHSShopInterval) % 2 == 0)
         {
+            DBGLN("HandleFHSS: Radio 2 Radio 1");
             Radio.SetFrequencyReg(FHSSgetNextFreq(), SX12XX_Radio_1);
             Radio.SetFrequencyReg(FHSSgetGeminiFreq(), SX12XX_Radio_2);
         }
         else
         {
+            DBGLN("HandleFHSS: Radio 1 Radio 2");
             Radio.SetFrequencyReg(FHSSgetNextFreq(), SX12XX_Radio_2);
             Radio.SetFrequencyReg(FHSSgetGeminiFreq(), SX12XX_Radio_1);
         }
@@ -1704,10 +1708,10 @@ void setup()
         setupConfigAndPocCheck();
         
         // Setup Antenna mode to be 2 (Diversity)
-        // #if defined(M0139)
-        // config.SetAntennaMode(2);
-        // config.Commit();
-        // #endif
+        #if defined(M0139)
+        config.SetAntennaMode(2);
+        config.Commit();
+        #endif
         #if defined(OPT_HAS_SERVO_OUTPUT)
         // If serial is not already defined, then see if there is serial pin configured in the PWM configuration
         if (GPIO_PIN_RCSIGNAL_RX == UNDEF_PIN && GPIO_PIN_RCSIGNAL_TX == UNDEF_PIN)
@@ -1762,9 +1766,9 @@ void setup()
 void loop()
 {
 
-    // DBGLN("Anetnna mode:%u\n", config.GetAntennaMode());
-    // loop_counter++;
-    // if (loop_counter%1000 == 0) {DBGLN("Loop Counter:%lu\n", loop_counter);}
+    DBGLN("Anetnna mode:%u\n", config.GetAntennaMode());
+    loop_counter++;
+    if (loop_counter%1000 == 0) {DBGLN("Loop Counter:%lu\n", loop_counter);}
 
     unsigned long now = millis();
 

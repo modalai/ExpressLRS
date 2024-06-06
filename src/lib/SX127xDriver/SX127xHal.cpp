@@ -5,9 +5,9 @@
 #include "logging.h"
 #include <SPI.h>
 
-// #ifdef M0139
-// extern SPIClass SPI_2;
-// #endif
+#ifdef M0139
+extern SPIClass SPI_2;
+#endif
 SX127xHal *SX127xHal::instance = NULL;
 
 SX127xHal::SX127xHal()
@@ -23,9 +23,9 @@ void SX127xHal::end()
         detachInterrupt(GPIO_PIN_DIO0_2);
     }
     SPI.end();
-// #ifdef M0139
-//     SPI_2.end();
-// #endif
+#ifdef M0139
+    SPI_2.end();
+#endif
     IsrCallback_1 = nullptr; // remove callbacks
     IsrCallback_2 = nullptr; // remove callbacks
 }
@@ -73,16 +73,16 @@ void SX127xHal::init()
     SPI.setDataMode(SPI_MODE0);
     SPI.begin();
     SPI.setClockDivider(SPI_CLOCK_DIV4); // 72 / 8 = 9 MHz
-// #ifdef M0139
-    // DBGLN("Config SPI_2");
-    // SPI_2.setMOSI(GPIO_PIN_MOSI_2);
-    // SPI_2.setMISO(GPIO_PIN_MISO_2);
-    // SPI_2.setSCLK(GPIO_PIN_SCK_2);
-    // SPI_2.setBitOrder(MSBFIRST);
-    // SPI_2.setDataMode(SPI_MODE0);
-    // SPI_2.begin();
-    // SPI_2.setClockDivider(SPI_CLOCK_DIV4); // 72 / 8 = 9 MHz
-// #endif //M0139
+#ifdef M0139
+    DBGLN("Config SPI_2");
+    SPI_2.setMOSI(GPIO_PIN_MOSI_2);
+    SPI_2.setMISO(GPIO_PIN_MISO_2);
+    SPI_2.setSCLK(GPIO_PIN_SCK_2);
+    SPI_2.setBitOrder(MSBFIRST);
+    SPI_2.setDataMode(SPI_MODE0);
+    SPI_2.begin();
+    SPI_2.setClockDivider(SPI_CLOCK_DIV4); // 72 / 8 = 9 MHz
+#endif //M0139
 #endif
 
     attachInterrupt(digitalPinToInterrupt(GPIO_PIN_DIO0), this->dioISR_1, RISING);
@@ -156,15 +156,15 @@ void ICACHE_RAM_ATTR SX127xHal::readRegister(uint8_t reg, uint8_t *data, uint8_t
     buf[0] = reg | SPI_READ;
 
     setNss(radioNumber, LOW);
-// #ifdef M0139
-//     if (radioNumber == SX12XX_Radio_1){
-//         SPI.transfer(buf, numBytes + 1);
-//     } else{
-//         SPI_2.transfer(buf, numBytes + 1);
-//     }
-// #else
+#ifdef M0139
+    if (radioNumber == SX12XX_Radio_1){
+        SPI.transfer(buf, numBytes + 1);
+    } else{
+        SPI_2.transfer(buf, numBytes + 1);
+    }
+#else
     SPI.transfer(buf, numBytes + 1);
-// #endif
+#endif
     setNss(radioNumber, HIGH);
 
     memcpy(data, buf + 1, numBytes);
@@ -199,15 +199,15 @@ void ICACHE_RAM_ATTR SX127xHal::writeRegister(uint8_t reg, uint8_t *data, uint8_
     memcpy(buf + 1, data, numBytes);
 
     setNss(radioNumber, LOW);
-// #ifdef M0139
-//     if (radioNumber == SX12XX_Radio_1){
-//         SPI.transfer(buf, numBytes + 1);
-//     } else{
-//         SPI_2.transfer(buf, numBytes + 1);
-//     }
-// #else
+#ifdef M0139
+    if (radioNumber == SX12XX_Radio_1){
+        SPI.transfer(buf, numBytes + 1);
+    } else{
+        SPI_2.transfer(buf, numBytes + 1);
+    }
+#else
     SPI.transfer(buf, numBytes + 1);
-// #endif
+#endif
     setNss(radioNumber, HIGH);
 }
 

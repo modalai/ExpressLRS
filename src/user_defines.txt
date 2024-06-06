@@ -43,7 +43,7 @@
 
 # Invert the TX/RX half-duplex pin in the transmitter code. Handset external
 # modules are almost all inverted. ESP32/8286 targets only
--DUART_INVERTED
+#-DUART_INVERTED
 
 # Use a custom baud rate on the receiver for a KISS v1 FC (which runs at 400000) or any other oddball baud
 # If not defined, will default to 420000
@@ -59,7 +59,7 @@
 
 ### OTHER OPTIONS: ###
 
--DAUTO_WIFI_ON_INTERVAL=60
+#-DAUTO_WIFI_ON_INTERVAL=60
 #-DHOME_WIFI_SSID=""
 #-DHOME_WIFI_PASSWORD=""
 
@@ -83,7 +83,7 @@
 ### Debugging options ###
 
 # Turn on debug messages, if disabled then all debugging options (starting with DEBUG_) are disabled
-#-DDEBUG_LOG
+-DDEBUG_LOG
 # Use DEBUG_LOG_VERBOSE instead (or both) to see verbose debug logging (spammy stuff)
 #-DDEBUG_LOG_VERBOSE
 

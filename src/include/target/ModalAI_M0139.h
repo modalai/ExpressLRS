@@ -19,7 +19,7 @@ https://github.com/jaxxzer
 #define GPIO_PIN_RST            PB2  // RADIO 1 
 // */
 
-/*  Radio 2
+// /*  Radio 2
 #define GPIO_PIN_NSS_2            PB12  // RADIO 2 
 #define GPIO_PIN_DIO0_2           PB4   // RADIO 2 
 #define GPIO_PIN_MOSI_2           PB15  // RADIO 2 
