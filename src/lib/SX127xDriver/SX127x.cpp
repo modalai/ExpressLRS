@@ -70,8 +70,10 @@ bool SX127xDriver::Begin()
     DBGLN("Setting 'lowFrequencyMode' used for 433MHz.");
   }
 
+  DBGLN("SX127x OPMODE STANDBY: BOTH RADIOS");
   SetMode(SX127x_OPMODE_STANDBY, SX12XX_Radio_All);
 
+  DBGLN("DETECT RADIO 1");
   if (!DetectChip(SX12XX_Radio_1))
   {
     return false;
@@ -79,6 +81,7 @@ bool SX127xDriver::Begin()
 
   if (GPIO_PIN_NSS_2 != UNDEF_PIN)
   {
+    DBGLN("DETECT RADIO 2");
     if (!DetectChip(SX12XX_Radio_2))
     {
       return false;
@@ -459,10 +462,12 @@ void ICACHE_RAM_ATTR SX127xDriver::RXnb()
 
   if (timeoutSymbols)
   {
+    // DBGLN("SX127x_OPMODE_RXSINGLE");
     SetMode(SX127x_OPMODE_RXSINGLE, SX12XX_Radio_All);
   }
   else
   {
+    // DBGLN("SX127x_OPMODE_RXCONTINUOUS");
     SetMode(SX127x_OPMODE_RXCONTINUOUS, SX12XX_Radio_All);
   }
 }

@@ -108,9 +108,11 @@ CROSSFIRE2MSP crsf2msp;
 MSP2CROSSFIRE msp2crsf;
 #endif
 
-uint32_t loop_counter{0};
+// uint32_t loop_counter{0};
 #if defined(M0139)
+#if defined(DUAL_RADIO)
 SPIClass SPI_2 = SPIClass();
+#endif
 #endif
 
 #if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32) || defined(M0139)
@@ -243,7 +245,7 @@ static inline void checkGeminiMode()
 {
     if (isDualRadio())
     {
-        DBGLN("Using Dual Radio!");
+        // DBGLN("Using Dual Radio!");
         geminiMode = config.GetAntennaMode();
     }
 }
@@ -375,10 +377,16 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
 
 bool ICACHE_RAM_ATTR HandleFHSS()
 {
+    DBGLN("HandleFHSS: start");
     uint8_t modresultFHSS = (OtaNonce + 1) % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
 
     if ((ExpressLRS_currAirRate_Modparams->FHSShopInterval == 0) || alreadyFHSS == true || InBindingMode || (modresultFHSS != 0) || (connectionState == disconnected))
     {
+        if (ExpressLRS_currAirRate_Modparams->FHSShopInterval == 0) DBGLN("HandleFHSS immediate return: ExpressLRS_currAirRate_Modparams->FHSShopInterval == 0");
+        if (alreadyFHSS) DBGLN("HandleFHSS immediate return: alreadyFHSS");
+        if (InBindingMode) DBGLN("HandleFHSS immediate return: InBindingMode");
+        if (modresultFHSS != 0) DBGLN("HandleFHSS immediate return: (modresultFHSS != 0)");
+        if (connectionState == disconnected) DBGLN("HandleFHSS immediate return: connectionState == disconnected");
         return false;
     }
 
@@ -402,6 +410,7 @@ bool ICACHE_RAM_ATTR HandleFHSS()
     }
     else
     {
+        DBGLN("HandleFHSS: single radio");
         Radio.SetFrequencyReg(FHSSgetNextFreq());
     }
 
@@ -410,7 +419,7 @@ bool ICACHE_RAM_ATTR HandleFHSS()
     uint8_t modresultTLM = (OtaNonce + 1) % ExpressLRS_currTlmDenom;
     if (modresultTLM != 0 || ExpressLRS_currTlmDenom == 1) // if we are about to send a tlm response don't bother going back to rx
     {
-        // DBGLN("HandleFHSS RXnb");
+        DBGLN("HandleFHSS RXnb");
         Radio.RXnb();
     }
 #endif
@@ -620,7 +629,7 @@ void ICACHE_RAM_ATTR updatePhaseLock()
 
 void ICACHE_RAM_ATTR HWtimerCallbackTick() // this is 180 out of phase with the other callback, occurs mid-packet reception
 {
-    // DBGLN("HWtimerCallbackTick");
+    DBGLN("HWtimerCallbackTick");
     updatePhaseLock();
     OtaNonce++;
 
@@ -671,7 +680,7 @@ static inline void switchAntenna()
 
 static void ICACHE_RAM_ATTR updateDiversity()
 {
-    // DBGLN("Updating Diversity, antenna mode: %u", config.GetAntennaMode());
+    DBGLN("Updating Diversity, antenna mode: %u", config.GetAntennaMode());
     if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
     {
         if(config.GetAntennaMode() == 2)
@@ -744,7 +753,7 @@ static void ICACHE_RAM_ATTR updateDiversity()
 
 void ICACHE_RAM_ATTR HWtimerCallbackTock()
 {
-    // DBGLN("HWtimerCallbackTock");
+    DBGLN("HWtimerCallbackTock");
     if (tlmSent && Radio.GetLastTransmitRadio() == SX12XX_Radio_NONE)
     {
         Radio.TXdoneCallback();
@@ -994,7 +1003,7 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
         || FHSSgetCurrIndex() != otaSync->fhssIndex
         || connectionHasModelMatch != modelMatched)
     {
-        //DBGLN("\r\n%ux%ux%u", OtaNonce, otaPktPtr->sync.nonce, otaPktPtr->sync.fhssIndex);
+        // DBGLN("\r\nDisconnected: %ux%ux%u", OtaNonce, otaPktPtr->sync.nonce, otaPktPtr->sync.fhssIndex);
         FHSSsetCurrIndex(otaSync->fhssIndex);
         OtaNonce = otaSync->nonce;
         TentativeConnection(now);
@@ -1039,9 +1048,11 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
     switch (otaPktPtr->std.type)
     {
     case PACKET_TYPE_RCDATA: //Standard RC Data Packet
+        DBGLN("Got Standard RC Packet");
         ProcessRfPacket_RC(otaPktPtr);
         break;
     case PACKET_TYPE_MSPDATA:
+        DBGLN("Got MSP Data Packet");
         ProcessRfPacket_MSP(otaPktPtr);
         break;
     case PACKET_TYPE_SYNC: //sync packet from master
@@ -1051,12 +1062,15 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
             && !InBindingMode;
         break;
     case PACKET_TYPE_TLM:
+        DBGLN("Got TLM Packet");
         if (firmwareOptions.is_airport)
         {
+            DBGLN("Got Airport Packet");
             OtaUnpackAirportData(otaPktPtr, &apOutputBuffer);
         }
         break;
     default:
+        DBGLN("Got UNKNOWN Packet");
         break;
     }
 
@@ -1090,15 +1104,18 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
 
 bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 {
-    // DBGLN("RXdoneISR");
+    DBGLN("RXdoneISR");
     if (LQCalc.currentIsSet() && connectionState == connected)
     {
+        DBGLN("RXdoneISR: Already received a packet, do not run ProcessRFPacket() again.");
         return false; // Already received a packet, do not run ProcessRFPacket() again.
     }
 
     if (ProcessRFPacket(status))
     {
+        DBGLN("RXdoneISR: Done processing packet");
         didFHSS = HandleFHSS();
+        DBGLN("RXdoneISR: didFHSS --> %u", didFHSS);
         return true;
     }
     return false;
@@ -1106,11 +1123,11 @@ bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 
 void ICACHE_RAM_ATTR TXdoneISR()
 {
-    // DBGLN("TXdoneISR");
+    DBGLN("TXdoneISR");
 #if defined(Regulatory_Domain_EU_CE_2400)
     BeginClearChannelAssessment();
 #else
-    // DBGLN("TXdoneISR RXnb");
+    DBGLN("TXdoneISR RXnb");
     Radio.RXnb();
 #endif
 #if defined(DEBUG_RX_SCOREBOARD)
@@ -1452,7 +1469,7 @@ static void cycleRfMode(unsigned long now)
         LQCalcDVDA.reset();
         // Display the current air rate to the user as an indicator something is happening
         scanIndex++;
-        // DBGLN("CycleRFMode RXnb");
+        DBGLN("CycleRFMode RXnb");
         Radio.RXnb();
         DBGLN("%u", ExpressLRS_currAirRate_Modparams->interval);
 
@@ -1626,7 +1643,7 @@ static void CheckConfigChangePending()
 #if defined(Regulatory_Domain_EU_CE_2400)
         LBTEnabled = (config.GetPower() > PWR_10mW);
 #endif
-        // DBGLN("CheckConfigChangePending RXnb");
+        DBGLN("CheckConfigChangePending RXnb");
         Radio.RXnb();
     }
 }
@@ -1709,8 +1726,10 @@ void setup()
         
         // Setup Antenna mode to be 2 (Diversity)
         #if defined(M0139)
+        #ifdef DUAL_RADIO
         config.SetAntennaMode(2);
         config.Commit();
+        #endif
         #endif
         #if defined(OPT_HAS_SERVO_OUTPUT)
         // If serial is not already defined, then see if there is serial pin configured in the PWM configuration
@@ -1749,7 +1768,7 @@ void setup()
             hwTimer.callbackTick = &HWtimerCallbackTick;
 
             MspReceiver.SetDataToReceive(MspData, ELRS_MSP_BUFFER);
-            // DBGLN("Setup RXnb");
+            DBGLN("Setup RXnb");
             Radio.RXnb();
             hwTimer.init();
         }
@@ -1765,10 +1784,8 @@ void setup()
 
 void loop()
 {
-
-    DBGLN("Anetnna mode:%u\n", config.GetAntennaMode());
-    loop_counter++;
-    if (loop_counter%1000 == 0) {DBGLN("Loop Counter:%lu\n", loop_counter);}
+    // loop_counter++;
+    // if (loop_counter%1000 == 0) {DBGLN("Loop Counter:%lu\n", loop_counter);DBGLN("Anetnna mode:%u\n", config.GetAntennaMode());}
 
     unsigned long now = millis();
 
@@ -1894,7 +1911,31 @@ void EnterBindingMode()
         // Don't enter binding if:
         // - we're already connected
         // - we're already binding
-        DBGLN("Cannot enter binding mode!");
+        // DBGLN("Cannot enter binding mode!\n\r\tConnection State: %i\n\r\tInBindingMode: %i", (int)connectionState, (int)InBindingMode);
+        if(InBindingMode){
+            DBGLN("Cannot enter binding mode! Already in binding mode");
+        } 
+        if(connectionState == connected){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: connected");
+        } else if (connectionState == tentative){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: tentative");
+        }else if (connectionState == disconnected){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: disconnected");
+        }else if (connectionState == noCrossfire){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: noCrossfire");
+        }else if (connectionState == wifiUpdate){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: wifiUpdate");
+        }else if (connectionState == serialUpdate){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: serialUpdate");
+        }else if (connectionState == bleJoystick){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: bleJoystick");
+        }else if (connectionState == radioFailed){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: radioFailed");
+        }else if (connectionState == hardwareUndefined){
+            DBGLN("Cannot enter binding mode!\n\r\tConnection State: hardwareUndefined");
+        }else {
+            DBGLN("Cannot enter binding mode!\n\r\tUnknown Connection State: %d", connectionState);
+        }
         return;
     }
 
@@ -1912,10 +1953,19 @@ void EnterBindingMode()
     // Start attempting to bind
     // Lock the RF rate and freq while binding
     SetRFLinkRate(enumRatetoIndex(RATE_BINDING));
-    Radio.SetFrequencyReg(GetInitialFreq());
+    // Radio.SetFrequencyReg(GetInitialFreq());
+    DBGLN("Init Freq: %u",GetInitialFreq());
+    Radio.SetFrequencyReg(GetInitialFreq(), SX12XX_Radio_1);
+    DBGLN("Current Freq: %u",Radio.currFreq);
     if (geminiMode)
     {
-        Radio.SetFrequencyReg(FHSSgetInitialGeminiFreq(), SX12XX_Radio_2);
+        DBGLN("EnterBindingMode: Gemini mode");
+        DBGLN("Init Gemini Freq: %u",FHSSgetInitialGeminiFreq());
+        // Radio.SetFrequencyReg(FHSSgetInitialGeminiFreq(), SX12XX_Radio_2);
+        Radio.SetFrequencyReg(GetInitialFreq(), SX12XX_Radio_2);    // Just doing this for testing since don't have gemini tx module rn..
+        DBGLN("Current Freq: %u",Radio.currFreq);
+    } else {
+        DBGLN("EnterBindingMode: Not in gemini mode");
     }
     // If the Radio Params (including InvertIQ) parameter changed, need to restart RX to take effect
     DBGLN("Enter Bind Mode RXnb");

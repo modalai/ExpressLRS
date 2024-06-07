@@ -6,7 +6,9 @@
 #include <SPI.h>
 
 #ifdef M0139
+#ifdef DUAL_RADIO
 extern SPIClass SPI_2;
+#endif
 #endif
 SX127xHal *SX127xHal::instance = NULL;
 
@@ -24,7 +26,9 @@ void SX127xHal::end()
     }
     SPI.end();
 #ifdef M0139
+#ifdef DUAL_RADIO
     SPI_2.end();
+#endif
 #endif
     IsrCallback_1 = nullptr; // remove callbacks
     IsrCallback_2 = nullptr; // remove callbacks
@@ -74,6 +78,7 @@ void SX127xHal::init()
     SPI.begin();
     SPI.setClockDivider(SPI_CLOCK_DIV4); // 72 / 8 = 9 MHz
 #ifdef M0139
+#ifdef DUAL_RADIO
     DBGLN("Config SPI_2");
     SPI_2.setMOSI(GPIO_PIN_MOSI_2);
     SPI_2.setMISO(GPIO_PIN_MISO_2);
@@ -82,6 +87,7 @@ void SX127xHal::init()
     SPI_2.setDataMode(SPI_MODE0);
     SPI_2.begin();
     SPI_2.setClockDivider(SPI_CLOCK_DIV4); // 72 / 8 = 9 MHz
+#endif //DUAL_RADIO
 #endif //M0139
 #endif
 
@@ -122,16 +128,16 @@ void SX127xHal::reset(void)
         pinMode(GPIO_PIN_RST, INPUT); // leave floating
     }
 
-// #ifdef M0139
-//     if (GPIO_PIN_RST_2 != UNDEF_PIN)
-//     {
-//         pinMode(GPIO_PIN_RST_2, OUTPUT);
-//         delay(100);
-//         digitalWrite(GPIO_PIN_RST_2, LOW);
-//         delay(100);
-//         pinMode(GPIO_PIN_RST_2, INPUT); // leave floating
-//     }
-// #endif 
+#ifdef M0139
+    if (GPIO_PIN_RST_2 != UNDEF_PIN)
+    {
+        pinMode(GPIO_PIN_RST_2, OUTPUT);
+        delay(100);
+        digitalWrite(GPIO_PIN_RST_2, LOW);
+        delay(100);
+        pinMode(GPIO_PIN_RST_2, INPUT); // leave floating
+    }
+#endif 
 
     DBGLN("SX127x Ready!");
 }
@@ -158,10 +164,23 @@ void ICACHE_RAM_ATTR SX127xHal::readRegister(uint8_t reg, uint8_t *data, uint8_t
     setNss(radioNumber, LOW);
 #ifdef M0139
     if (radioNumber == SX12XX_Radio_1){
+        // DBGLN("Reading Radio 1 SPI");
         SPI.transfer(buf, numBytes + 1);
-    } else{
+    }
+#ifdef DUAL_RADIO
+    else if (radioNumber == SX12XX_Radio_2){
+        // DBGLN("Reading Radio 2 SPI");
+        SPI_2.transfer(buf, numBytes + 1);
+    } 
+    else{
+        // DBGLN("Reading BOTH RADIOS");
+        // DBGLN("Reading Radio 1 SPI");
+        SPI.transfer(buf, numBytes + 1);
+
+        // DBGLN("Reading Radio 2 SPI");
         SPI_2.transfer(buf, numBytes + 1);
     }
+#endif
 #else
     SPI.transfer(buf, numBytes + 1);
 #endif
@@ -201,10 +220,23 @@ void ICACHE_RAM_ATTR SX127xHal::writeRegister(uint8_t reg, uint8_t *data, uint8_
     setNss(radioNumber, LOW);
 #ifdef M0139
     if (radioNumber == SX12XX_Radio_1){
+        // DBGLN("Writing Radio 1 SPI");
         SPI.transfer(buf, numBytes + 1);
-    } else{
+    } 
+#ifdef DUAL_RADIO
+    else if (radioNumber == SX12XX_Radio_2){
+        // DBGLN("Writing Radio 2 SPI");
+        SPI_2.transfer(buf, numBytes + 1);
+    } 
+    else{
+        // DBGLN("Writing BOTH RADIOS");
+        // DBGLN("Writing Radio 1 SPI");
+        SPI.transfer(buf, numBytes + 1);
+
+        // DBGLN("Writing Radio 2 SPI");
         SPI_2.transfer(buf, numBytes + 1);
     }
+#endif
 #else
     SPI.transfer(buf, numBytes + 1);
 #endif

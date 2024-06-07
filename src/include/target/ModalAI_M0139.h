@@ -51,5 +51,6 @@ https://github.com/jaxxzer
 #define Ch4    PA11    // TIM1 CH4 
 
 #define M0139
+#define DUAL_RADIO
 #define SYSCLK_FREQ_72MHz
 // #define GPIO_PIN_ANT_CTRL PB10 // Unused pin
