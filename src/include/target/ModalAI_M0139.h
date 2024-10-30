@@ -68,8 +68,8 @@ https://github.com/jaxxzer
 #define GPIO_PIN_PWM_OUTPUTS (int[]){Ch1, Ch2, Ch3, Ch4}
 #define GPIO_PIN_PWM_OUTPUTS_COUNT 4
 #else
-#define CRSF_INVERTER
-#define DEBUG_TX_FREERUN
+//#define CRSF_INVERTER
+//#define DEBUG_TX_FREERUN
 
 #endif
 
