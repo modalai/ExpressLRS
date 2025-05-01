@@ -16,6 +16,8 @@ extern device_t ServoOut_device;
 
 extern bool updatePWM;
 extern rx_pwm_config_in pwmInput;
+extern bool overridePWM;
+extern pwm_val_override_t pwmOverride;
 
 // Notify this unit that new channel data has arrived
 void servoNewChannelsAvailable();

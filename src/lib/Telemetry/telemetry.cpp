@@ -54,6 +54,13 @@ bool Telemetry::ShouldCallUpdatePWM()
     return pwmUp;
 }
 
+bool Telemetry::ShouldCallOverridePWM()
+{
+    bool pwmOvr = callOverridePWM;
+    callOverridePWM = false;
+    return pwmOvr;
+}
+
 bool Telemetry::ShouldCallUpdateUID()
 {
     bool updateID = callUpdateUID;
@@ -303,6 +310,14 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
         {
             callUpdatePWM = true;
             pwmInput = *((rx_pwm_config_in *) &package[4]);
+            return true;
+        }
+        if ((header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER
+            && header->orig_addr == CRSF_ADDRESS_FLIGHT_CONTROLLER
+            && header->payload[0] == PWMCmd::SET_PWM_VAL))
+        {
+            callOverridePWM = true;
+            pwmValueOverride = *((pwm_val_override_t *) &header->payload[0]);
             return true;
         }
     }

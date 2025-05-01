@@ -162,7 +162,10 @@ static void servosUpdate(unsigned long now)
     if (newChannelsAvailable)
     {
         newChannelsAvailable = false;
-        lastUpdate = now;
+        if(!overridePWM)
+            lastUpdate = now;
+        else
+            lastUpdate = 0; // Don't let an override cause a failsafe
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
@@ -288,7 +291,7 @@ static int start()
 
 static int event()
 {
-    // Change pwm value from telemetry command
+    // Change pwm config from telemetry command
     if (updatePWM){
         updatePWM = false;
 
@@ -342,6 +345,15 @@ static int event()
         config.SetPwmChannel(pwmPin, 0, pwmInputChannel, false, som50Hz, false);
 #endif
     }
+    // Change pwm value from telemetry command
+    if (overridePWM){
+        ChannelData[pwmOverride.rc_channel - 1] = pwmOverride.crsf_channel_value;
+        newChannelsAvailable = true;
+        servosUpdate(millis());
+
+        overridePWM = false;
+    }
+
 
     if (!OPT_HAS_SERVO_OUTPUT || connectionState == disconnected)
     {

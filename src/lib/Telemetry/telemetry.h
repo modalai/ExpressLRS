@@ -14,10 +14,14 @@ enum CustomTelemSubTypeID : uint8_t {
 enum PWMCmd : uint8_t {
     SET_PWM_CH = 0xF3,
     SET_PWM_VAL = 0xF4,
-    SET_PWM_MICRO = 0xF5,
-    SET_PWM_DUTY = 0xF6,
     SET_PWM_DEFAULT = 0xFF
 };
+
+typedef struct pwm_val_override_t {
+    uint8_t command;
+    uint8_t rc_channel;
+    uint16_t crsf_channel_value;
+} __attribute__((packed)) pwm_val_override_t;
 
 typedef enum {
     TELEMETRY_IDLE = 0,
@@ -66,6 +70,7 @@ public:
     bool ShouldCallEnterBind();
     bool ShouldCallUnbind();
     bool ShouldCallUpdatePWM();
+    bool ShouldCallOverridePWM();
     bool ShouldCallUpdateModelMatch();
     bool ShouldSendDeviceFrame();
     void CheckCrsfBatterySensorDetected();
@@ -83,6 +88,7 @@ public:
     uint8_t * GetNewUID(){ return newUID;}
 #if defined(TARGET_RX)
     rx_pwm_config_in GetPwmInput(){ return pwmInput;}
+    pwm_val_override_t GetPwmOverride(){ return pwmValueOverride; }
 #endif
 private:
     bool processInternalTelemetryPackage(uint8_t *package);
@@ -104,8 +110,10 @@ private:
     bool crsfBaroSensorDetected;
     bool callUpdateUID;
     bool callUpdatePWM;
+    bool callOverridePWM;
     uint8_t modelMatchId;
 #if defined(TARGET_RX)
+    pwm_val_override_t pwmValueOverride;
     rx_pwm_config_in pwmInput;
 #endif
 };
