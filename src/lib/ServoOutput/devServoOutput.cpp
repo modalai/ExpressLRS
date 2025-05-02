@@ -347,7 +347,8 @@ static int event()
     }
     // Change pwm value from telemetry command
     if (overridePWM){
-        ChannelData[pwmOverride.rc_channel - 1] = pwmOverride.crsf_channel_value;
+        // Value received over the wire is big-endian, swap it here
+        ChannelData[pwmOverride.rc_channel - 1] = ((pwmOverride.crsf_channel_value & 0xFF) << 8) | ((pwmOverride.crsf_channel_value & 0xFF00) >> 8);
         newChannelsAvailable = true;
         servosUpdate(millis());
 
