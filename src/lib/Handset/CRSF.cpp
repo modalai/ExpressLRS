@@ -12,6 +12,9 @@ uint8_t CRSF::MspDataLength = 0;
 static const auto MSP_SERIAL_OUT_FIFO_SIZE = 256U;
 static FIFO<MSP_SERIAL_OUT_FIFO_SIZE> MspWriteFIFO;
 
+#ifndef HARDWARE_REV
+#define HARDWARE_REV 0x01
+#endif
 
 /***
  * @brief: Convert `version` (string) to a integer version representation

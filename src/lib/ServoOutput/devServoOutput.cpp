@@ -342,7 +342,7 @@ static int event()
             }
         }
 #else
-        config.SetPwmChannel(pwmPin, 0, pwmInputChannel, false, som50Hz, false);
+        // config.SetPwmChannel(pwmPin, 0, pwmInputChannel, false, som50Hz, false);
 #endif
     }
     // Change pwm value from telemetry command
