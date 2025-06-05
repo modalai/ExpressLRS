@@ -1966,7 +1966,7 @@ void EnterUnbindMode()
     memcpy(UID, config.GetUID(), UID_LEN);
 #else
     uint8_t new_id[UID_LEN] = {0};
-    memcpy(UID, new_id, UID_LEN);
+    UpdateUID(new_id);
 #endif
     devicesTriggerEvent();
 }
