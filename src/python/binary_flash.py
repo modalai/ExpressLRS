@@ -162,9 +162,11 @@ def upload_dir(mcuType, args):
 
 def upload(options: FirmwareOptions, args):
     if args.baud == 0:
-        args.baud = 921600 # hardcoded for modalAI bootloader
-        # if args.flash == UploadMethod.betaflight or args.flash == UploadMethod.uart:
-        #     args.baud = 420000
+        args.baud = 460800 # hardcoded for modalAI TX bootloader
+        if args.flash == UploadMethod.edgetx:
+            args.baud = 921600 # hardcoded for modalAI TX bootloader
+        if args.flash == UploadMethod.betaflight or args.flash == UploadMethod.uart:
+            args.baud = 420000
 
     if args.flash == UploadMethod.dir or args.flash == UploadMethod.stock:
         return upload_dir(options.mcuType, args)
