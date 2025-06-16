@@ -399,6 +399,22 @@ bool CRSFHandset::processInternalCrsfPackage(uint8_t *package)
     const crsf_ext_header_t *header = (crsf_ext_header_t *)package;
     const crsf_frame_type_e packetType = (crsf_frame_type_e)header->type;
 
+    // Reset into bootloader
+    if (packetType == CRSF_FRAMETYPE_COMMAND)
+    {
+            if (package[3] == 'b' && package[4] == 'l')
+            {
+                #if defined(PLATFORM_STM32)
+                    __disable_irq();
+                    __HAL_RCC_SYSCFG_CLK_ENABLE();
+                    __DSB();
+                    __ISB();
+                    SCB->VTOR = 0;
+                    NVIC_SystemReset();
+                #endif
+            }
+    }
+
     // Enter Binding Mode
     if (packetType == CRSF_FRAMETYPE_COMMAND
         && header->frame_size >= 6 // official CRSF is 7 bytes with two CRCs
