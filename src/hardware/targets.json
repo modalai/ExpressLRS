@@ -2723,7 +2723,7 @@
             },
             "m0193": {
                 "product_name": "ModalAI M0193 TX",
-                "upload_methods": ["uart", "betaflight"],
+                "upload_methods": ["uart", "betaflight", "etx"],
                 "min_version": "3.0.0",
                 "platform": "stm32",
                 "lua_name": "ModalAI M0193",

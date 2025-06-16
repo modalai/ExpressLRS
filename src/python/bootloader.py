@@ -1,6 +1,7 @@
 
 INIT_SEQ = {
     "CRSF": [0xEC,0x04,0x32,ord('b'),ord('l')],
+    "CRSF-TX": [0xEE,0x04,0x32,ord('b'),ord('l')],
     "GHST": [0x89,0x04,0x32,ord('b'),ord('l')],
 }
 
