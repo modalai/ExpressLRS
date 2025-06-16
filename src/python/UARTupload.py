@@ -26,6 +26,7 @@ def uart_upload(port, filename, baudrate, ghst=False, ignore_incorrect_target=Fa
     dbg_print("=================== FIRMWARE UPLOAD ===================\n")
     dbg_print("  Bin file '%s'\n" % filename)
     dbg_print("  Port %s @ %s\n" % (port, baudrate))
+    dbg_print("  Target '%s'\n" % target)
 
     logging.basicConfig(level=logging.ERROR)
 
@@ -34,8 +35,12 @@ def uart_upload(port, filename, baudrate, ghst=False, ignore_incorrect_target=Fa
         half_duplex = True
         dbg_print("  Using GHST (half duplex)!\n")
     else:
-        BootloaderInitSeq1 = bootloader.get_init_seq('CRSF', key)
-        dbg_print("  Using CRSF (full duplex)!\n")
+        # if target contains "TX"
+        if target and "_TX" in target:
+            BootloaderInitSeq1 = bootloader.get_init_seq('CRSF-TX', key)
+        else:
+            BootloaderInitSeq1 = bootloader.get_init_seq('CRSF', key)
+            dbg_print("  Using CRSF (full duplex)!\n")
     BootloaderInitSeq2 = bytes([0x62,0x62,0x62,0x62,0x62,0x62])
 
     if not os.path.exists(filename):

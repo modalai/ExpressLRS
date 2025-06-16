@@ -69,6 +69,12 @@ def upload_stm32_stlink(args, options: FirmwareOptions):
 
     return ElrsUploadResult.Success
 
+def upload_stm32_etx(args, options):
+    if args.port == None:
+        args.port = serials_find.get_serial_port()
+    ETXinitPassthrough.etx_passthrough_init(args.port, args.baud)
+    return UARTupload.uart_upload(args.port, args.file.name, args.baud, target=options.firmware.upper(), accept=args.accept, ignore_incorrect_target=args.force)
+
 def upload_esp8266_uart(args):
     if args.port == None:
         args.port = serials_find.get_serial_port()
@@ -156,9 +162,9 @@ def upload_dir(mcuType, args):
 
 def upload(options: FirmwareOptions, args):
     if args.baud == 0:
-        args.baud = 460800
-        if args.flash == UploadMethod.betaflight or args.flash == UploadMethod.uart:
-            args.baud = 420000
+        args.baud = 921600 # hardcoded for modalAI bootloader
+        # if args.flash == UploadMethod.betaflight or args.flash == UploadMethod.uart:
+        #     args.baud = 420000
 
     if args.flash == UploadMethod.dir or args.flash == UploadMethod.stock:
         return upload_dir(options.mcuType, args)
@@ -202,5 +208,7 @@ def upload(options: FirmwareOptions, args):
                 return upload_wifi(args, options, ['elrs_txbp', 'elrs_txbp.local'], True)
             elif args.flash == UploadMethod.betaflight or args.flash == UploadMethod.uart:
                 return upload_stm32_uart(args, options)
+            elif args.flash == UploadMethod.edgetx:
+                return upload_stm32_etx(args, options)
     print("Invalid upload method for firmware")
     return ElrsUploadResult.ErrorGeneral
