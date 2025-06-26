@@ -1,7 +1,7 @@
 #!/bin/bash
 
-MODALAI_VERSION="0"
-TARGETS_LIST=("m0184_rx" "m0184_tx" "m0193_rx" "m0193_tx")
+MODALAI_VERSION="" #don't set so build.sh will use git to pull modalai version
+TARGETS_LIST=("m0184_rx" "m0193_rx" "m0193_tx" "BETAFPV_900_RX")
 
 
 print_usage () {
@@ -32,7 +32,9 @@ while getopts "e:v:" opt; do
 done
 
 for element in "${TARGETS_LIST[@]}"; do
-    TARGET_CMD="-v ${MODALAI_VERSION} -t ${element}"
+    # TARGET_CMD="-v ${MODALAI_VERSION} -t ${element}"
+    TARGET_CMD="-t ${element}"
+    echo "target command: $TARGET_CMD"
 
     bash build.sh $TARGET_CMD
 done

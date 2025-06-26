@@ -6,10 +6,22 @@
 MAJOR_VERSION=3
 MINOR_VERSION=5
 PATCH_VERSION=3
+
+# Find the highest MODALAI_VERSION for this MAJOR.MINOR.PATCH combination
+MODALAI_TAGS=$(git tag --list | grep "^${MAJOR_VERSION}\.${MINOR_VERSION}\.${PATCH_VERSION}\." | sort -V)
+if [ -n "$MODALAI_TAGS" ]; then
+    # Get the last (highest) tag and extract the MODALAI_VERSION
+    HIGHEST_MODALAI_TAG=$(echo "$MODALAI_TAGS" | tail -1)
+    export MODALAI_VERSION=${HIGHEST_MODALAI_TAG##*.}
+    echo "Found MODALAI tags for ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}, using MODALAI_VERSION=$MODALAI_VERSION"
+else
+    export MODALAI_VERSION=0
+    echo "No MODALAI tags found for ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}, using MODALAI_VERSION=0"
+fi
+
 FORMAT_MAJOR=$(printf %02d $MAJOR_VERSION)
 FORMAT_MINOR=$(printf %02d $MINOR_VERSION)
 FORMAT_PATCH=$(printf %02d $PATCH_VERSION)
-export MODALAI_VERSION="0"
 export ELRS_VER="0x${FORMAT_MAJOR}${FORMAT_MINOR}${FORMAT_PATCH}00"
 ENCRYPT=0
 TARGET=""
@@ -95,48 +107,37 @@ case $TARGET in
         TARGET="Unified_ESP32_900_TX_via_UART"
         FW="iFlight-900-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
         ;;
+    "BETAFPV_900_RX")
+        TARGET="Unified_ESP8285_900_RX_via_UART"
+        FW="BETAFPV_900_RX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
+        ;;
     *)
-        if [[ $TARGET == "" ]]; then 
-            echo "Missing Target to build for!"
-            exit
-        else 
-            case $TARGET in
-                *2400* | FM30*)
-                    PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_ISM_2400" platformio run -e $TARGET
-                    OUTDIR=artifacts/$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION/$TARGET
-                    mkdir -p $OUTDIR
-                    mv .pio/build/$TARGET/*.bin $OUTDIR >& /dev/null || :
-                    ;;
-                *)
-                    PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915" platformio run -e $TARGET
-                    OUTDIR=artifacts/$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION/$TARGET
-                    mkdir -p $OUTDIR
-                    mv .pio/build/$TARGET/*.bin $OUTDIR >& /dev/null || :
-                    ;;
-            esac
-
-        fi
+        echo "Missing Target to build for!"
         exit
         ;;
 esac
 
-export PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915"
 # Build application
-platformio run --environment $TARGET # -v > build_output.txt
+export PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915"
+if [[ $TARGET == Unified_ESP* ]]; then  
+    echo "" | pio run -e $TARGET # echo "" to use Generic 900.json layout file
+else
+    pio run --environment $TARGET # -v > build_output.txt
+fi
 
 BUILD_DIR=".pio/build/$TARGET"
 md5sum $BUILD_DIR/firmware.bin
 
 if [ "$ENCRYPT" -eq 1 ]; then 
     # Encrypt application 
-    echo "Encrpyting application"
+    echo "Encrypting application"
     stm32-encrypt $BUILD_DIR/firmware.bin $BUILD_DIR/$FW $ENCRYPT_KEY
 else
     echo "Leaving application un-encrypted"
     cp $BUILD_DIR/firmware.bin $BUILD_DIR/$FW
 fi
 
-# Print out md5sum so we can verify what we push onto target matches what we just built and ecnrypted here
+# Print out md5sum so we can verify what we push onto target matches what we just built and encrypted here
 md5sum $BUILD_DIR/$FW
 
 # Copy/Push ELRS FW bin to desired location on voxl2
