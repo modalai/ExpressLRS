@@ -118,7 +118,7 @@ case $TARGET in
 esac
 
 # Build application
-export PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915"
+# export PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915" # not needed since user_defines.txt is used
 if [[ $TARGET == Unified_ESP* ]]; then  
     echo "" | pio run -e $TARGET # echo "" to use Generic 900.json layout file
 else
