@@ -1308,9 +1308,11 @@ bool setupHardwareFromOptions()
 #define PRNG_C 12345
 #define PRNG_M 2147483648
 
-static uint32_t psuedo_rand(uint32_t seed) {
-    seed = (PRNG_A * seed + PRNG_C) % PRNG_M;
-    return seed;
+static uint32_t psuedo_rand(uint32_t x) {
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+    return x;
 }
 
 static void setupBindingFromConfig()
@@ -1326,13 +1328,18 @@ static void setupBindingFromConfig()
     esp_read_mac(UID, ESP_MAC_WIFI_STA);
 #elif defined(PLATFORM_STM32)
     // ModalAI: Deterministic Pseudo-random ID
-    // Seed is based on the lower 32 bits of the UUID register
-    uint32_t uid_seed = *(uint32_t *)UID_BASE;
-    for(int i = 0; i < UID_LEN; i++)
-    {
-      // Generate a random UID
-      UID[i] = (uint8_t) psuedo_rand(uid_seed + i);
-    }
+    // Seed is based on the lower 64 bits of the UUID register
+	uint32_t UID_0 = HAL_GetUIDw0();
+	uint32_t UID_1 = HAL_GetUIDw1();
+	UID_0 = psuedo_rand(UID_0);
+	UID_1 = psuedo_rand(UID_0 ^ UID_1);
+	UID[0] = (UID_0 & 0xFF000000) >> 24;
+	UID[1] = (UID_0 & 0x00FF0000) >> 16;
+	UID[2] = (UID_0 & 0x0000FF00) >> 8;
+	UID[3] = (UID_0 & 0x000000FF) >> 0;
+	UID[4] = (UID_1 & 0xFF000000) >> 24;
+	UID[5] = (UID_1 & 0x00FF0000) >> 16;
+
     // TODO: Save random ID to EEPROM
     // Modify flashedOptions to make
 #else
