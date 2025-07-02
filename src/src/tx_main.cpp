@@ -1303,11 +1303,6 @@ bool setupHardwareFromOptions()
   return true;
 }
 
-// Random number generation for UIDs
-#define PRNG_A 1103515245
-#define PRNG_C 12345
-#define PRNG_M 2147483648
-
 static uint32_t psuedo_rand(uint32_t x) {
 	x ^= x << 13;
 	x ^= x >> 17;
