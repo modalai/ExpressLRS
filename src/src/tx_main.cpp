@@ -1326,14 +1326,18 @@ static void setupBindingFromConfig()
     // Seed is based on the lower 64 bits of the UUID register
 	uint32_t UID_0 = HAL_GetUIDw0();
 	uint32_t UID_1 = HAL_GetUIDw1();
-	UID_0 = psuedo_rand(UID_0);
-	UID_1 = psuedo_rand(UID_0 ^ UID_1);
-	UID[0] = (UID_0 & 0xFF000000) >> 24;
-	UID[1] = (UID_0 & 0x00FF0000) >> 16;
-	UID[2] = (UID_0 & 0x0000FF00) >> 8;
-	UID[3] = (UID_0 & 0x000000FF) >> 0;
-	UID[4] = (UID_1 & 0xFF000000) >> 24;
-	UID[5] = (UID_1 & 0x00FF0000) >> 16;
+	uint32_t UID_2 = HAL_GetUIDw2();
+	uint32_t seed = psuedo_rand(UID_0);
+	seed = psuedo_rand(seed ^ UID_1);
+	seed = psuedo_rand(seed ^ UID_2);
+	uint32_t UID_lower = psuedo_rand(seed);
+	uint32_t UID_upper = psuedo_rand(UID_lower);
+	UID[0] = (UID_lower & 0xFF000000) >> 24;
+	UID[1] = (UID_lower & 0x00FF0000) >> 16;
+	UID[2] = (UID_lower & 0x0000FF00) >> 8;
+	UID[3] = (UID_lower & 0x000000FF) >> 0;
+	UID[4] = (UID_upper & 0xFF000000) >> 24;
+	UID[5] = (UID_upper & 0x00FF0000) >> 16;
 
     // TODO: Save random ID to EEPROM
     // Modify flashedOptions to make
