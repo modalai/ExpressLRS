@@ -6,9 +6,9 @@ TARGETS_LIST=("m0184_rx" "m0193_rx" "m0193_tx" "BETAFPV_900_RX")
 
 print_usage () {
 	echo ""
-	echo "Build script for buidling ExpressLRS firmware"
+	echo "Build script for building ExpressLRS firmware"
     echo "Args:"
-    echo -e "   e) Enable encrpytion of firmware (pass in the key)"
+    echo -e "   e) Enable encryption of firmware (pass in the key)"
     echo -e "   v) Version of firmware being built"
 }
 
