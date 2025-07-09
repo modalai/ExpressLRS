@@ -29,10 +29,10 @@ ENCRYPT_KEY=""
 
 print_usage () {
 	echo ""
-	echo "Build script for buidling ExpressLRS firmware"
+	echo "Build script for building ExpressLRS firmware"
     echo "Args:"
-    echo -e "   e) Enable encrpytion of firmware (pass in the key)"
-    echo -e "   t) Target to build (m0184, r9mini)"
+    echo -e "   e) Enable encryption of firmware (pass in the key)"
+    echo -e "   t) Target to build (m0184_rx, m0193_rx, m0193_tx, BETAFPV_900_RX)"
     echo -e "   v) Version of firmware being built"
 }
 
