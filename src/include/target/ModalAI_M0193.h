@@ -5,7 +5,11 @@
 #include "ModalAI_Common.h"
 
 // Output Power - Default to SX1276 max output
-#define POWER_OUTPUT_FIXED 0 // -4 dbm input to FEM
+// #define POWER_OUTPUT_FIXED 0 // -4 dbm input to FEM
+#define MinPower                PWR_1000mW
+#define MaxPower                PWR_1000mW
+#define DefaultPower            PWR_1000mW
+#define POWER_OUTPUT_VALUES     {0} // -4 dbm input to FEM
 
 #define USE_SX1276_RFO_HF
 #define OPT_USE_SX1276_RFO_HF true
