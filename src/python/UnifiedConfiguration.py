@@ -3,6 +3,7 @@
 import argparse
 import json
 import struct
+import os
 import sys
 
 from external import jmespath
@@ -115,7 +116,7 @@ def doConfiguration(file, defines, config, moduletype, frequency, platform, devi
 def appendConfiguration(source, target, env):
     target_name = env.get('PIOENV', '').upper()
     device_name = env.get('DEVICE_NAME', None)
-    config = env.GetProjectOption('board_config', None)
+    config = env.GetProjectOption('board_config', os.getenv('ELRS_BOARD_CONFIG', None))
     if 'UNIFIED_' not in target_name and config is None:
         return
 

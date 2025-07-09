@@ -120,9 +120,13 @@ esac
 # Build application
 # export PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915" # not needed since user_defines.txt is used
 if [[ $TARGET == Unified_ESP* ]]; then  
-    echo "" | pio run -e $TARGET # echo "" to use Generic 900.json layout file
+    #if FW BETAFPV_900_RX
+    if [[ $FW == BETAFPV_900_RX* ]]; then
+        export ELRS_BOARD_CONFIG=betafpv.rx_900.plain
+    fi
+    pio run -e $TARGET
 else
-    pio run --environment $TARGET # -v > build_output.txt
+    pio run -e $TARGET # -v > build_output.txt
 fi
 
 BUILD_DIR=".pio/build/$TARGET"
