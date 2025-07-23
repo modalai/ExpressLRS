@@ -994,6 +994,26 @@ static void EnterBindingMode()
   DBGLN("Entered binding mode at freq = %d", Radio.currFreq);
 }
 
+void reset_into_bootloader(void)
+{
+    // SERIAL_PROTOCOL_TX.println((const char *)&target_name[4]);
+    // SERIAL_PROTOCOL_TX.flush();
+#if defined(PLATFORM_ESP8266)
+    delay(100);
+    ESP.rebootIntoUartDownloadMode();
+#elif defined(PLATFORM_ESP32)
+    delay(100);
+    connectionState = serialUpdate;
+#elif defined(PLATFORM_STM32)
+    __disable_irq();
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
+    __DSB();
+    __ISB();
+    SCB->VTOR = 0;
+    NVIC_SystemReset();
+#endif
+}
+
 static void ExitBindingMode()
 {
   if (!InBindingMode)
@@ -1010,6 +1030,8 @@ static void ExitBindingMode()
   SetRFLinkRate(config.GetRate()); //return to original rate
 
   DBGLN("Exiting binding mode");
+  // todo this is a hack to fix initial bind issue
+  reset_into_bootloader();
 }
 
 void EnterBindingModeSafely()
