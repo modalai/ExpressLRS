@@ -611,7 +611,8 @@ bool ICACHE_RAM_ATTR HandleSendTelemetryResponse()
 int32_t ICACHE_RAM_ATTR HandleFreqCorr(bool value)
 {
     int32_t tempFC = FreqCorrection;
-    if (Radio.GetProcessingPacketRadio() == SX12XX_Radio_2)
+    SX12XX_Radio_Number_t currentRadio = Radio.GetProcessingPacketRadio();
+    if (currentRadio == SX12XX_Radio_2)
     {
         tempFC = FreqCorrection_2;
     }
@@ -621,9 +622,10 @@ int32_t ICACHE_RAM_ATTR HandleFreqCorr(bool value)
         if (tempFC > FreqCorrectionMin)
         {
             tempFC--; // FREQ_STEP units
+            DBGLN("tempFC--  Radio=%d FC=%d", currentRadio, tempFC);
             if (tempFC == FreqCorrectionMin)
             {
-                DBGLN("Max -FreqCorrection reached!");
+                DBGLN("Max -FreqCorrection reached! Radio=%d FC=%d", currentRadio, tempFC);
             }
         }
     }
@@ -632,9 +634,10 @@ int32_t ICACHE_RAM_ATTR HandleFreqCorr(bool value)
         if (tempFC < FreqCorrectionMax)
         {
             tempFC++; // FREQ_STEP units
+            DBGLN("tempFC++  Radio=%d FC=%d", currentRadio, tempFC);
             if (tempFC == FreqCorrectionMax)
             {
-                DBGLN("Max +FreqCorrection reached!");
+                DBGLN("Max +FreqCorrection reached!  Radio=%d FC=%d", currentRadio, tempFC);
             }
         }
     }
@@ -1194,10 +1197,12 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
     if (Radio.FrequencyErrorAvailable())
     {
     #if defined(RADIO_SX127X)
-        // Adjusts FreqCorrection for RX freq offset
-        int32_t tempFreqCorrection = HandleFreqCorr(Radio.GetFrequencyErrorbool());
-        // Teamp900 also needs to adjust its demood PPM
-        Radio.SetPPMoffsetReg(tempFreqCorrection);
+        #if !defined(m0139)
+            // Adjusts FreqCorrection for RX freq offset
+            int32_t tempFreqCorrection = HandleFreqCorr(Radio.GetFrequencyErrorbool());
+            // Teamp900 also needs to adjust its demood PPM
+            Radio.SetPPMoffsetReg(tempFreqCorrection);
+        #endif
     #else /* !RADIO_SX127X */
         // Adjusts FreqCorrection for RX freq offset
         HandleFreqCorr(Radio.GetFrequencyErrorbool());
@@ -1966,6 +1971,7 @@ void EnterUnbindMode()
     memcpy(UID, config.GetUID(), UID_LEN);
 #else
     uint8_t new_id[UID_LEN] = {0};
+    //todo this enters bootloader, so should it be called?
     UpdateUID(new_id);
 #endif
     devicesTriggerEvent();
@@ -2171,15 +2177,6 @@ void setup()
 #endif
         // Init EEPROM and load config, checking powerup count
         setupConfigAndPocCheck();
-
-        // Setup Antenna mode to be 2 (Diversity)
-        #if defined(M0139)
-        #ifdef DUAL_RADIO
-        config.SetAntennaMode(2);
-        config.Commit();
-        #endif
-        #endif
-
 #if !(defined(TARGET_USE_EEPROM) && defined(USE_I2C))
         setupTarget();
 #endif
@@ -2404,5 +2401,6 @@ void UpdateUID(uint8_t * newID)
     LostConnection(true);
 
     // Reboot after setting the UID
-    reset_into_bootloader();
+    //todo should this be called  since it disables_irq and not always needed?
+    // reset_into_bootloader();
 }
