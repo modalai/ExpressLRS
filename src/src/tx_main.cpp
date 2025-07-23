@@ -1421,18 +1421,6 @@ void setup()
     eeprom.Begin(); // Init the eeprom
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load(); // Load the stored values from eeprom
-
-    DBGLN("CFG Loaded");
-
-      #if defined(M0139)
-      #ifdef DUAL_RADIO
-      config.SetAntennaMode(TX_RADIO_MODE_GEMINI);
-      // config.SetAntennaMode(TX_RADIO_MODE_ANT_1);
-      config.SetRate(RATE_LORA_50HZ);
-      config.Commit();
-      #endif
-      #endif
-
     // TODO: if no UID assigned, or UID == 0.0.0.0.0.0, assign a new random ID
 
     Radio.currFreq = FHSSgetInitialFreq(); //set frequency first or an error will occur!!!
