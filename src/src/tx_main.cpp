@@ -1031,7 +1031,9 @@ static void ExitBindingMode()
 
   DBGLN("Exiting binding mode");
   // todo this is a hack to fix initial bind issue
-  reset_into_bootloader();
+  #if defined(M0139)
+    reset_into_bootloader();
+  #endif
 }
 
 void EnterBindingModeSafely()
