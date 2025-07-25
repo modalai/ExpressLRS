@@ -135,6 +135,28 @@ def get_git_sha():
 def get_version():
     return string_to_ascii(env.get('GIT_VERSION'))
 
+def get_version_hex():
+    """Convert git version string to hex format for numeric use"""
+    version_str = env.get('GIT_VERSION')
+    if not version_str:
+        return "0x00000000"
+    
+    try:
+        # Split version string like "3.5.3.13" into parts
+        parts = version_str.split('.')[:4]  # Take first 4 parts max
+        hex_value = 0
+        
+        for i, part in enumerate(parts):
+            # Extract numeric part only (handles "3.5.3-rc1" etc)
+            numeric_part = ''.join(filter(str.isdigit, part))
+            if numeric_part:
+                num = min(int(numeric_part), 255)  # Cap at 255 for single byte
+                hex_value |= (num << (8 * (3 - i)))  # Shift left for each byte position
+        
+        return f"0x{hex_value:08x}"
+    except:
+        return "0x00000000"
+
 json_flags['flash-discriminator'] = randint(1,2**32-1)
 json_flags['wifi-on-interval'] = -1
 
@@ -145,8 +167,7 @@ build_flags.append("-DLATEST_COMMIT=" + get_git_sha())
 build_flags.append("-DLATEST_VERSION=" + get_version())
 build_flags.append("-DTARGET_NAME=" + re.sub("_VIA_.*", "", target_name))
 build_flags.append("-DMODALAI_VERSION=" + os.environ.get("MODALAI_VERSION", "0x00"))
-#v3.5.3.12
-build_flags.append("-DMODAL_ELRS_VER=" + os.environ.get("ELRS_VER", "0x0305030C"))
+build_flags.append("-DMODAL_ELRS_VER=" + os.environ.get("ELRS_VER", get_version_hex()))
 condense_flags()
 
 if '-DRADIO_SX127X=1' in build_flags or '-DRADIO_LR1121=1' in build_flags:
