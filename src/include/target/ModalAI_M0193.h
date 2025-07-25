@@ -6,10 +6,15 @@
 
 // Output Power - Default to SX1276 max output
 // #define POWER_OUTPUT_FIXED 0 // -4 dbm input to FEM
-#define MinPower                PWR_1000mW
+#define MinPower                PWR_250mW
 #define MaxPower                PWR_1000mW
-#define DefaultPower            PWR_1000mW
-#define POWER_OUTPUT_VALUES     {0} // -4 dbm input to FEM
+#define DefaultPower            PWR_250mW
+
+// -4.2 dbm input to FEM
+// 0 = -4.2+30=25.8 dBm ~= 300mW
+// 2 = -4.2+30=27.8 dBm ~= 600mW
+// 4 = -4.2+30=29.8 dBm ~= 1000mW
+#define POWER_OUTPUT_VALUES     {0, 2, 5} 
 
 #define USE_SX1276_RFO_HF
 #define OPT_USE_SX1276_RFO_HF true
