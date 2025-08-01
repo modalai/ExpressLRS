@@ -77,6 +77,24 @@ pwm_channel_t PWMController::allocate(uint8_t pin, uint32_t frequency)
                     break;
             }
 
+            // Set frequency here
+            // OVERRIDES IT FOR THE OTHER PWM ON THE SAME TIMER!!!!
+            switch(pin){
+                case Ch1:
+                case Ch2:
+                    TIM3->ARR = 1000000U / frequency;
+                    break;
+                case Ch3:
+                case Ch4:
+                    TIM1->ARR = 1000000U / frequency;
+                    break;
+
+                default:
+                    DBGLN("Trying to set frequency of Undefined pin: %u", pin);
+                    break;
+            }
+
+
             return channel;
         }
     }
@@ -166,22 +184,22 @@ void PWMController::setMicroseconds(pwm_channel_t channel, uint16_t microseconds
     uint16_t mappedValue = 0;
     switch(pin){
         case Ch1:
-            mappedValue = map(microseconds, 0, 2100, 0, htim3.Init.Period);
+            mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, mappedValue);
             break;
         
         case Ch2:
-            mappedValue = map(microseconds, 0, 2100, 0, htim3.Init.Period);
+            mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, mappedValue);
             break;
 
         case Ch3:
-            mappedValue = map(microseconds, 0, 2100, 0, htim1.Init.Period);
+            mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, mappedValue);
             break;
         
         case Ch4:
-            mappedValue = map(microseconds, 0, 2100, 0, htim1.Init.Period);
+            mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, mappedValue);
             break;
 
@@ -262,7 +280,7 @@ static void TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 72;        // 72MHz APB2 CLK -> 1MHz APB2 CLK
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 2068;         // 2100 us at 1 MHz 
+  htim1.Init.Period = 20000;         // 2100 us at 1 MHz
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -334,7 +352,7 @@ static void TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 72;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 2068;         // 2100 us at 1 MHz 
+  htim3.Init.Period = 20000;         // 2100 us at 1 MHz
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
