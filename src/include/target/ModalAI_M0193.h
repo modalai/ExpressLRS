@@ -11,9 +11,9 @@
 #define DefaultPower            PWR_250mW
 
 // -4.2 dbm input to FEM
-// 0 = -4.2+30=25.8 dBm ~= 300mW
-// 2 = -4.2+30=27.8 dBm ~= 600mW
-// 4 = -4.2+30=29.8 dBm ~= 1000mW
+// 0 + -4.2+30=25.8 dBm ~= 300mW
+// 2 + -4.2+30=27.8 dBm ~= 600mW
+// 5 + -4.2+30=29.8 dBm ~= 1000mW
 #define POWER_OUTPUT_VALUES     {0, 2, 5} 
 
 #define USE_SX1276_RFO_HF
