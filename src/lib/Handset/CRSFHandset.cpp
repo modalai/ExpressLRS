@@ -158,12 +158,7 @@ void CRSFHandset::Begin()
     // Invert RX/TX (not done, connection is full duplex uninverted)
     //USC0(UART0) |= BIT(UCRXI) | BIT(UCTXI);
     // No log message because this is our only UART
-#elif defined(M0139)
-    halfDuplex = false;
-    CRSFHandset::Port.setTx(GPIO_PIN_RCSIGNAL_TX);
-    CRSFHandset::Port.setRx(GPIO_PIN_RCSIGNAL_RX);
 
-    CRSFHandset::Port.begin(UARTrequestedBaud);
 #elif defined(PLATFORM_STM32)
     DBGLN("Start STM32 R9M TX CRSF UART %d : %d", GPIO_PIN_RCSIGNAL_RX, GPIO_PIN_RCSIGNAL_TX);
     halfDuplex = true;
@@ -526,7 +521,13 @@ void CRSFHandset::handleInput()
     {
         // if currently transmitting in half-duplex mode then check if the TX buffers are empty.
         // If there is still data in the transmit buffers then exit, and we'll check next go round.
-#if defined(PLATFORM_ESP32)
+#if defined(PLATFORM_STM32)
+        if (Port.availableForWrite() != SERIAL_TX_BUFFER_SIZE - 1)
+        {
+            return;
+        }
+        Port.flush();
+#elif defined(PLATFORM_ESP32)
         if (!uart_ll_is_tx_idle(UART_LL_GET_HW(0)))
         {
             return;
@@ -620,7 +621,7 @@ void CRSFHandset::handleOutput(int receivedBytes)
             if (!transmitting)
             {
                 transmitting = true;
-                //duplex_set_TX();
+                duplex_set_TX();
             }
         }
 
