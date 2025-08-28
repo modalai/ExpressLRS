@@ -40,8 +40,9 @@ https://github.com/jaxxzer
 #define GPIO_PIN_DEBUG_RX           PA3
 #define GPIO_PIN_DEBUG_TX           PA2
 // only used for external modules, not connected on internal module
-#define GPIO_PIN_BUFFER_OE PA11
+#define GPIO_PIN_BUFFER_OE          PA11
 #define GPIO_PIN_BUFFER_OE_INVERTED 0
+#define GPIO_PIN_FAN_EN             PA8
 #else
 #define GPIO_PIN_RCSIGNAL_TX        PA9
 #define GPIO_PIN_RCSIGNAL_RX        PA10
