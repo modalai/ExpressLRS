@@ -1970,10 +1970,10 @@ void EnterUnbindMode()
 #ifdef PARTIAL_UNBIND
     memcpy(UID, config.GetUID(), UID_LEN);
 #else
-    uint8_t new_id[UID_LEN] = {0};
-    //todo this enters bootloader, so should it be called?
+    uint8_t new_id[UID_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // key should never match tx
     UpdateUID(new_id);
 #endif
+    ExitBindingMode();
     devicesTriggerEvent();
 }
 
