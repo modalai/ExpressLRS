@@ -1806,16 +1806,7 @@ static void EnterBindingMode()
     // Start attempting to bind
     // Lock the RF rate and freq while binding
     SetRFLinkRate(enumRatetoIndex(RATE_BINDING), true);
-    Radio.SetFrequencyReg(FHSSgetInitialFreq(), SX12XX_Radio_1);
-    if (geminiMode)
-    {
-        DBGLN("EnterBindingMode: Gemini mode");
-        DBGLN("Init Gemini Freq: %u",FHSSgetInitialGeminiFreq());
-        Radio.SetFrequencyReg(FHSSgetInitialGeminiFreq(), SX12XX_Radio_2);
-        // Radio.SetFrequencyReg(FHSSgetInitialFreq(), SX12XX_Radio_2);    // Just doing this for testing since don't have gemini tx module rn..
-        DBGLN("Current Freq: %u",Radio.currFreq);
-    }
-    DBGLN("Enter Bind Mode RXnb");
+
     // If the Radio Params (including InvertIQ) parameter changed, need to restart RX to take effect
     Radio.RXnb();
 
@@ -2400,7 +2391,6 @@ void UpdateUID(uint8_t * newID)
     config.Commit();
     LostConnection(true);
 
-    // Reboot after setting the UID
-    //todo should this be called  since it disables_irq and not always needed?
+    // todo should this be called since it disables_irq and not always needed?
     // reset_into_bootloader();
 }
