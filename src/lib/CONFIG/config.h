@@ -238,10 +238,10 @@ typedef union {
         uint64_t  mapInVal1:10,   // input value 1 (All these values are right shifted one bit to save space)
                   mapInVal2:10,   // input value 1 (Input values should be CRSF)
                   mapInVal3:10,   // input value 1
-                  mapOutVal1:10,  // output value 1 (Output values should be us)
-                  mapOutVal2:10,  // output value 1
-                  mapOutVal3:10,  // output value 1
-                  extra:4;
+                  mapOutVal1:11,  // output value 1 (Output values should be us)
+                  mapOutVal2:11,  // output value 1
+                  mapOutVal3:11,  // output value 1
+                  extra:1;
     } val;
     struct {
         uint32_t raw[3];

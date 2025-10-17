@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Versioning info: 
 # https://www.expresslrs.org/quick-start/receivers/firmware-version/#receiver-firmware-version 
