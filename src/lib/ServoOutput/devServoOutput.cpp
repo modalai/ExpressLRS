@@ -136,7 +136,7 @@ static void servoWrite(uint8_t ch, uint16_t us)
 
 static void servosFailsafe()
 {
-    constexpr unsigned SERVO_FAILSAFE_MIN = 900U;
+    constexpr unsigned SERVO_FAILSAFE_MIN = 800U;
     for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
     {
         const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);

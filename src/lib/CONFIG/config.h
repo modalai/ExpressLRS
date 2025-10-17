@@ -226,14 +226,14 @@ typedef struct __attribute__((packed)) {
 
 typedef union {
     struct {
-        uint32_t  failsafe:10,    // us output during failsafe +988 (e.g. 512 here would be 1500us)
+        uint32_t  failsafe:11,    // us output during failsafe +988 (e.g. 512 here would be 1500us)
                   inputChannel:4, // 0-based input channel
                   inverted:1,     // invert channel output
                   mode:4,         // Output mode (eServoOutputMode)
                   narrow:1,       // Narrow output mode (half pulse width)
                   failsafeMode:2, // failsafe output mode (eServoOutputFailsafeMode)
                   mapMode:2,      // uses the mapping values to 
-                  unused:8;       // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
+                  unused:7;       // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
 
         uint64_t  mapInVal1:10,   // input value 1 (All these values are right shifted one bit to save space)
                   mapInVal2:10,   // input value 1 (Input values should be CRSF)
