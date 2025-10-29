@@ -18,8 +18,17 @@ void SerialIO::sendQueuedData(uint32_t maxBytesToSend)
 {
     uint32_t bytesWritten = 0;
 
-    while (_fifo.size() > _fifo.peek() && (bytesWritten + _fifo.peek()) < maxBytesToSend)
+    while (_fifo.size() > _fifo.peek() && (bytesWritten + _fifo.peek()) <= maxBytesToSend)
     {
+        uint8_t pktLen = _fifo.peek();
+
+        // Check if there's enough space in the serial output buffer
+        // If not, break and try again later
+        if (_outputPort->availableForWrite() < pktLen)
+        {
+            break;
+        }
+
         _fifo.lock();
         uint8_t OutPktLen = _fifo.pop();
         uint8_t OutData[OutPktLen];

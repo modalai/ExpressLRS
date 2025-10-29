@@ -23,6 +23,10 @@ static uint8_t parameterType;
 static uint8_t parameterIndex;
 static uint8_t parameterArg;
 static volatile bool UpdateParamReq = false;
+#ifdef TARGET_RX
+// Callback for sending parameter responses to serial port (if set, responses go to serial instead of telemetry)
+static void (*paramSerialOutputCallback)(uint8_t *data) = nullptr;
+#endif
 
 static struct luaPropertiesCommon *paramDefinitions[LUA_MAX_PARAMS] = {0}; // array of luaItem_*
 static luaCallback paramCallbacks[LUA_MAX_PARAMS] = {0};
@@ -147,11 +151,19 @@ static uint8_t sendCRSFparam(crsf_frame_type_e frameType, uint8_t fieldChunk, st
   }
 #else
   chunkBuffer[3] |= luaData->type;
-  uint8_t paramInformation[DEVICE_INFORMATION_LENGTH];
+  uint8_t paramInformation[CRSF_FRAME_SIZE_MAX];
 #endif
 
   // Copy the name to the buffer starting at chunkBuffer[4]
-  uint8_t *chunkStart = (uint8_t *)stpcpy((char *)&chunkBuffer[4], luaData->name) + 1;
+  uint8_t *chunkStart;
+  if (dataType == CRSF_FOLDER)
+  {
+    chunkStart = luaFolderStructToArray(luaData, &chunkBuffer[4]);
+  }
+  else
+  {
+    chunkStart = (uint8_t *)stpcpy((char *)&chunkBuffer[4], luaData->name) + 1;
+  }
   uint8_t *dataEnd;
 
   switch(dataType) {
@@ -174,12 +186,28 @@ static uint8_t sendCRSFparam(crsf_frame_type_e frameType, uint8_t fieldChunk, st
       dataEnd = luaStringStructToArray(luaData, chunkStart);
       break;
     case CRSF_FOLDER:
+#ifdef TARGET_RX
+    {
+      // Append the list of child parameter IDs, terminated with 0xFF
+      uint8_t *childPos = chunkStart;
+      for (uint8_t idx = 1; idx <= lastLuaField; ++idx)
+      {
+        if (paramDefinitions[idx] != nullptr && paramDefinitions[idx]->parent == luaData->id)
+        {
+          *childPos++ = paramDefinitions[idx]->id;
+        }
+      }
+      *childPos++ = 0xFF;
+      dataEnd = childPos - 1;
+    }
+#else
       // re-fetch the lua data name, because luaFolderStructToArray will decide whether
       //to return the fixed name or dynamic name.
       chunkStart = luaFolderStructToArray(luaData, &chunkBuffer[4]);
       // subtract 1 because dataSize expects the end to not include the null
       // which is already accounted for in chunkStart
       dataEnd = chunkStart - 1;
+#endif
       break;
     case CRSF_FLOAT:
     case CRSF_OUT_OF_RANGE:
@@ -190,34 +218,77 @@ static uint8_t sendCRSFparam(crsf_frame_type_e frameType, uint8_t fieldChunk, st
   // dataEnd points to the end of the last string
   // -2 bytes Lua chunk header: FieldId, ChunksRemain
   // +1 for the null on the last string
-  uint8_t dataSize = (dataEnd - chunkBuffer) - 2 + 1;
+  uint16_t dataSize = 0;
+  if (dataEnd >= (chunkBuffer + 2))
+  {
+    dataSize = (uint16_t)((dataEnd - (chunkBuffer + 2)) + 1);
+  }
   // Maximum number of chunked bytes that can be sent in one response
   // 6 bytes CRSF header/CRC: Dest, Len, Type, ExtSrc, ExtDst, CRC
   // 2 bytes Lua chunk header: FieldId, ChunksRemain
 #ifdef TARGET_TX
-  uint8_t chunkMax = handset->GetMaxPacketBytes() - 6 - 2;
+  const uint8_t chunkMax = handset->GetMaxPacketBytes() - 6 - 2;
 #else
-  uint8_t chunkMax = CRSF_MAX_PACKET_LEN - 6 - 2;
+  const uint8_t chunkMax = CRSF_MAX_PACKET_LEN - 6 - 2;
 #endif
-  // How many chunks needed to send this field (rounded up)
-  uint8_t chunkCnt = (dataSize + chunkMax - 1) / chunkMax;
-  // Data left to send is adjustedSize - chunks sent already
-  uint8_t chunkSize = min((uint8_t)(dataSize - (fieldChunk * chunkMax)), chunkMax);
+  if (chunkMax <= 2)
+  {
+    ERRLN("Invalid chunkMax=%u", chunkMax);
+    return 0;
+  }
 
-  // Move chunkStart back 2 bytes to add (FieldId + ChunksRemain) to each packet
-  chunkStart = &chunkBuffer[fieldChunk * chunkMax];
-  chunkStart[0] = luaData->id;                 // FieldId
-  chunkStart[1] = chunkCnt - (fieldChunk + 1); // ChunksRemain
+  const uint8_t chunkDataMax = chunkMax - 2; // remove FieldId + ChunksRemain bytes
+  const uint8_t *fieldData = chunkBuffer + 2; // skip reserved header bytes
+  uint8_t chunkCnt = dataSize == 0 ? 1 : (uint8_t)((dataSize + chunkDataMax - 1) / chunkDataMax);
+
+  if (fieldChunk >= chunkCnt)
+  {
+    ERRLN("Chunk %u out of range (total %u) for field %u", fieldChunk, chunkCnt, luaData->id);
+    return 0;
+  }
+
+  const uint16_t dataOffset = fieldChunk * chunkDataMax;
+  const uint16_t remainingData = (dataSize > dataOffset) ? (dataSize - dataOffset) : 0;
+  const uint8_t dataBytesThisChunk = remainingData > chunkDataMax ? chunkDataMax : (uint8_t)remainingData;
+  const uint8_t chunkSize = dataBytesThisChunk + 2; // include FieldId + ChunksRemain
+  const uint8_t chunksRemaining = chunkCnt - (fieldChunk + 1);
+
+  uint8_t chunkPayload[CRSF_MAX_PACKET_LEN];
+  chunkPayload[0] = luaData->id;
+  chunkPayload[1] = chunksRemaining;
+  memcpy(&chunkPayload[2], fieldData + dataOffset, dataBytesThisChunk);
+
 #ifdef TARGET_TX
-  CRSFHandset::packetQueueExtended(frameType, chunkStart, chunkSize + 2);
+  CRSFHandset::packetQueueExtended(frameType, chunkPayload, chunkSize);
 #else
-  memcpy(paramInformation + sizeof(crsf_ext_header_t),chunkStart,chunkSize + 2);
+  const size_t payloadBytes = chunkSize;
+  const size_t frameBytes = sizeof(crsf_ext_header_t) + payloadBytes + CRSF_FRAME_CRC_SIZE;
+  if (frameBytes > sizeof(paramInformation))
+  {
+    ERRLN("LUA param frame too large: %u bytes (max %u)", (unsigned)frameBytes, (unsigned)sizeof(paramInformation));
+    return 0;
+  }
 
-  CRSF::SetExtendedHeaderAndCrc(paramInformation, frameType, chunkSize + CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 2, CRSF_ADDRESS_CRSF_RECEIVER, CRSF_ADDRESS_CRSF_TRANSMITTER);
+  memcpy(paramInformation + sizeof(crsf_ext_header_t), chunkPayload, payloadBytes);
 
-  telemetry.AppendTelemetryPackage(paramInformation);
+  CRSF::SetExtendedHeaderAndCrc(paramInformation, frameType, chunkSize + CRSF_FRAME_LENGTH_EXT_TYPE_CRC, CRSF_ADDRESS_CRSF_RECEIVER, CRSF_ADDRESS_CRSF_TRANSMITTER);
+
+  // Route response based on request source
+  DBGLN("sendCRSFparam: paramSerialOutputCallback=%p", paramSerialOutputCallback);
+  if (paramSerialOutputCallback != nullptr)
+  {
+    // Send response to serial port via callback
+    DBGLN("Sending param response to serial via callback");
+    paramSerialOutputCallback(paramInformation);
+  }
+  else
+  {
+    // Send response via telemetry (OTA)
+    DBGLN("Sending param response to telemetry");
+    telemetry.AppendTelemetryPackage(paramInformation);
+  }
 #endif
-  return chunkCnt - (fieldChunk+1);
+  return chunksRemaining;
 }
 
 static void pushResponseChunk(struct luaItem_command *cmd) {
@@ -303,18 +374,49 @@ void luaRegisterDevicePingCallback(void (*callback)())
 
 #endif
 
+uint8_t getLuaParamCount()
+{
+  return lastLuaField;
+}
+
 void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg)
 {
   parameterType = type;
   parameterIndex = index;
   parameterArg = arg;
   UpdateParamReq = true;
+#ifdef TARGET_RX
+  paramSerialOutputCallback = nullptr; // Default to OTA request (telemetry)
+#endif
 }
+
+#ifdef TARGET_RX
+void luaParamUpdateReqSerial(uint8_t type, uint8_t index, uint8_t arg, void (*callback)(uint8_t*))
+{
+  DBGLN("luaParamUpdateReqSerial: type=0x%02X, index=%d, arg=%d, callback=%p", type, index, arg, callback);
+  parameterType = type;
+  parameterIndex = index;
+  parameterArg = arg;
+  UpdateParamReq = true;
+  paramSerialOutputCallback = callback; // Set callback for serial output
+  DBGLN("UpdateParamReq set to true, paramSerialOutputCallback=%p", paramSerialOutputCallback);
+}
+#endif
 
 void registerLUAParameter(void *definition, luaCallback callback, uint8_t parent)
 {
   if (definition == nullptr)
   {
+#ifdef TARGET_RX
+    static const char agentLiteFolderName[] = "HooJ";
+    static struct luaItem_folder luaAgentLite = {
+        {agentLiteFolderName, CRSF_FOLDER},
+    };
+
+    paramDefinitions[0] = (struct luaPropertiesCommon *)&luaAgentLite;
+    paramCallbacks[0] = 0;
+    return;
+#else
     static uint8_t agentLiteFolder[4+LUA_MAX_PARAMS+2] = "HooJ";
     static struct luaItem_folder luaAgentLite = {
         {(const char *)agentLiteFolder, CRSF_FOLDER},
@@ -333,6 +435,7 @@ void registerLUAParameter(void *definition, luaCallback callback, uint8_t parent
     *pos++ = 0xFF;
     *pos++ = 0;
     return;
+#endif
   }
 
   struct luaPropertiesCommon *p = (struct luaPropertiesCommon *)definition;
@@ -345,10 +448,13 @@ void registerLUAParameter(void *definition, luaCallback callback, uint8_t parent
 
 bool luaHandleUpdateParameter()
 {
+  DBGVLN("luaHandleUpdateParameter() called, UpdateParamReq=%d", UpdateParamReq);
   if (UpdateParamReq == false)
   {
     return false;
   }
+
+  DBGLN("Processing parameter request: type=0x%02X, index=%d, arg=%d", parameterType, parameterIndex, parameterArg);
 
   switch(parameterType)
   {
@@ -437,6 +543,20 @@ void sendLuaDevicePacket(void)
   CRSFHandset::packetQueueExtended(CRSF_FRAMETYPE_DEVICE_INFO, deviceInformation + sizeof(crsf_ext_header_t), DEVICE_INFORMATION_PAYLOAD_LENGTH);
 #else
   CRSF::SetExtendedHeaderAndCrc(deviceInformation, CRSF_FRAMETYPE_DEVICE_INFO, DEVICE_INFORMATION_FRAME_SIZE, CRSF_ADDRESS_CRSF_RECEIVER, CRSF_ADDRESS_CRSF_TRANSMITTER);
-  telemetry.AppendTelemetryPackage(deviceInformation);
+
+  // Route response based on request source
+  DBGLN("sendLuaDevicePacket: paramSerialOutputCallback=%p", paramSerialOutputCallback);
+  if (paramSerialOutputCallback != nullptr)
+  {
+    // Send response to serial port via callback
+    DBGLN("Sending device info to serial via callback");
+    paramSerialOutputCallback(deviceInformation);
+  }
+  else
+  {
+    // Send response via telemetry (OTA)
+    DBGLN("Sending device info to telemetry");
+    telemetry.AppendTelemetryPackage(deviceInformation);
+  }
 #endif
 }

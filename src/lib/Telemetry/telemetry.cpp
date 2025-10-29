@@ -75,6 +75,13 @@ bool Telemetry::ShouldCallUpdateModelMatch()
     return updateModelMatch;
 }
 
+bool Telemetry::ShouldCallParameterRequest()
+{
+    bool paramReq = callParameterRequest;
+    callParameterRequest = false;
+    return paramReq;
+}
+
 bool Telemetry::ShouldSendDeviceFrame()
 {
     bool deviceFrame = sendDeviceFrame;
@@ -174,6 +181,10 @@ void Telemetry::ResetState()
     currentPayloadIndex = 0;
     twoslotLastQueueIndex = 0;
     receivedPackages = 0;
+    callParameterRequest = false;
+    paramRequestType = 0;
+    paramRequestIndex = 0;
+    paramRequestArg = 0;
 
     uint8_t offset = 0;
 
@@ -326,6 +337,23 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
     {
         sendDeviceFrame = true;
         return true;
+    }
+
+    // Handle parameter read/write requests from serial port
+    if (header->type == CRSF_FRAMETYPE_PARAMETER_READ ||
+        header->type == CRSF_FRAMETYPE_PARAMETER_WRITE)
+    {
+        if (header->dest_addr == CRSF_ADDRESS_BROADCAST ||
+            header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER)
+        {
+            callParameterRequest = true;
+            paramRequestType = header->type;
+            // For extended frames with repeated destination:
+            // payload[0] = dest_addr (again), payload[1] = field_id, payload[2] = chunk/arg
+            paramRequestIndex = header->payload[1];   // Field ID (skip repeated dest)
+            paramRequestArg = header->payload[2];     // Chunk or arg
+            return true;
+        }
     }
 
     return false;

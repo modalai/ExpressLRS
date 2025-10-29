@@ -84,28 +84,6 @@ void debugFreeInitLogger();
     #define DBGVLN(...)
   #endif
 
-#elif defined(DEBUG_LOG) && defined(M0139) && defined(DEBUG_ACTIVE)
-
-#include "Active.h"
-
-    #define DBG(msg, ...) ACTIVEprintf(0, msg, ##__VA_ARGS__)
-    #define DBGLN(msg, ...) ACTIVEprintf(0, msg, ##__VA_ARGS__)
-    #define DBGCR // Line breaks are unnecessary
-    #define DBGW(c) ACTIVEprintf(1, "%c", c);
-
-  // Verbose logging is for spammy stuff
-  #if defined(DEBUG_LOG_VERBOSE)
-    #define DBGVCR DBGCR
-    #define DBGVW(c) DBGW(c)
-    #define DBGV(...) DBG(__VA_ARGS__)
-    #define DBGVLN(...) DBGLN(__VA_ARGS__)
-  #else
-    #define DBGVCR
-    #define DBGVW(c)
-    #define DBGV(...)
-    #define DBGVLN(...)
-  #endif
-
 #elif defined(DEBUG_LOG) && !defined(CRITICAL_FLASH)
   #define DBGCR   LOGGING_UART.println()
   #define DBGW(c) LOGGING_UART.write(c)

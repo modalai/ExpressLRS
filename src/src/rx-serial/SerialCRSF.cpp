@@ -4,6 +4,7 @@
 #include "device.h"
 #include "telemetry.h"
 #include "logging.h"
+#include "lua.h"
 #if defined(USE_MSP_WIFI)
 #include "msp2crsf.h"
 
@@ -13,6 +14,25 @@ extern MSP2CROSSFIRE msp2crsf;
 extern Telemetry telemetry;
 extern void reset_into_bootloader();
 extern void UpdateModelMatch(uint8_t model);
+extern void luaParamUpdateReqSerial(uint8_t type, uint8_t index, uint8_t arg, void (*callback)(uint8_t*));
+
+// Static pointer to current SerialCRSF instance for parameter callback
+static SerialCRSF *currentSerialCRSF = nullptr;
+
+// Callback function for sending parameter responses to serial
+static void sendParamToSerial(uint8_t *data)
+{
+    DBGLN("sendParamToSerial callback called");
+    if (currentSerialCRSF != nullptr)
+    {
+        DBGLN("Queuing parameter response to serial");
+        currentSerialCRSF->queueMSPFrameTransmission(data);
+    }
+    else
+    {
+        DBGLN("ERROR: currentSerialCRSF is NULL!");
+    }
+}
 
 #ifdef GPIO_PIN_PWM_OUTPUTS
 // M0139 PWM config via Serial
@@ -30,6 +50,14 @@ void SerialCRSF::sendQueuedData(uint32_t maxBytesToSend)
     #if defined(USE_MSP_WIFI)
     while (msp2crsf.FIFOout.size() > msp2crsf.FIFOout.peek() && (bytesWritten + msp2crsf.FIFOout.peek()) < maxBytesToSend)
     {
+        uint8_t pktLen = msp2crsf.FIFOout.peek();
+
+        // Check if there's enough space in the serial output buffer
+        if (this->_outputPort->availableForWrite() < pktLen)
+        {
+            break;
+        }
+
         msp2crsf.FIFOout.lock();
         uint8_t OutPktLen = msp2crsf.FIFOout.pop();
         uint8_t OutData[OutPktLen];
@@ -138,6 +166,9 @@ void SerialCRSF::queueMSPFrameTransmission(uint8_t* data)
 
 void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
 {
+    // Set the current instance for parameter callback
+    currentSerialCRSF = this;
+
     for (int i=0 ; i<size ; i++)
     {
         telemetry.RXhandleUARTin(bytes[i]);
@@ -165,7 +196,7 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
         if (telemetry.ShouldSendDeviceFrame())
         {
             uint8_t deviceInformation[DEVICE_INFORMATION_LENGTH];
-            CRSF::GetDeviceInformation(deviceInformation, 0);
+            CRSF::GetDeviceInformation(deviceInformation, getLuaParamCount());
             CRSF::SetExtendedHeaderAndCrc(deviceInformation, CRSF_FRAMETYPE_DEVICE_INFO, DEVICE_INFORMATION_FRAME_SIZE, CRSF_ADDRESS_CRSF_RECEIVER, CRSF_ADDRESS_FLIGHT_CONTROLLER);
             queueMSPFrameTransmission(deviceInformation);
         }
@@ -184,6 +215,16 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
             pwmOverride = telemetry.GetPwmOverride();
             ServoOut_device.event();
 #endif // Servo output
+        }
+        if (telemetry.ShouldCallParameterRequest())
+        {
+            DBGLN("Received parameter request via serial");
+            luaParamUpdateReqSerial(
+                telemetry.GetParameterRequestType(),
+                telemetry.GetParameterRequestIndex(),
+                telemetry.GetParameterRequestArg(),
+                sendParamToSerial  // Pass callback for serial output
+            );
         }
     }
 }

@@ -110,7 +110,7 @@ protected:
     /// @brief flag that indicates the receiver is in the failsafe state
     bool failsafe = false;
 
-    static const uint32_t SERIAL_OUTPUT_FIFO_SIZE = 256U;
+    static const uint32_t SERIAL_OUTPUT_FIFO_SIZE = 512U;
 
 
     /**

@@ -86,6 +86,10 @@ public:
     bool AppendTelemetryPackage(uint8_t *package);
     bool ShouldCallUpdateUID();
     uint8_t * GetNewUID(){ return newUID;}
+    bool ShouldCallParameterRequest();
+    uint8_t GetParameterRequestType() { return paramRequestType; }
+    uint8_t GetParameterRequestIndex() { return paramRequestIndex; }
+    uint8_t GetParameterRequestArg() { return paramRequestArg; }
 #if defined(TARGET_RX)
     rx_pwm_config_in GetPwmInput(){ return pwmInput;}
     pwm_val_override_t GetPwmOverride(){ return pwmValueOverride; }
@@ -111,7 +115,11 @@ private:
     bool callUpdateUID;
     bool callUpdatePWM;
     bool callOverridePWM;
+    bool callParameterRequest;
     uint8_t modelMatchId;
+    uint8_t paramRequestType;
+    uint8_t paramRequestIndex;
+    uint8_t paramRequestArg;
 #if defined(TARGET_RX)
     pwm_val_override_t pwmValueOverride;
     rx_pwm_config_in pwmInput;
