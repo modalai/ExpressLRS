@@ -15,9 +15,6 @@ extern void reconfigureSerial1();
 extern bool BindingModeRequest;
 
 static char modelString[] = "000";
-#if defined(GPIO_PIN_PWM_OUTPUTS)
-static char pwmModes[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHzDuty;On/Off;DShot;Serial RX;Serial TX;I2C SCL;I2C SDA;Serial2 RX;Serial2 TX";
-#endif
 
 static struct luaItem_selection luaSerialProtocol = {
     {"Protocol", CRSF_TEXT_SELECTION},
@@ -133,53 +130,197 @@ static struct luaItem_string luaELRSversion = {
 //---------------------------- Output Mapping -----------------------------
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
+
+// Zero-overhead per-pin folder design
+// Shared string literals (compiler automatically deduplicates)
+static const char STR_INPUT_CH[] = "Input Channel";
+static const char STR_OUTPUT_MODE[] = "Output Mode";
+static const char STR_INVERT[] = "Invert Output";
+static const char STR_NARROW[] = "Narrow Pulse";
+static const char STR_FAILSAFE_MODE[] = "Failsafe Mode";
+static const char STR_FAILSAFE_VAL[] = "Failsafe (us)";
+static const char STR_PIN_1[] = "Pin 1";
+static const char STR_PIN_2[] = "Pin 2";
+static const char STR_PIN_3[] = "Pin 3";
+static const char STR_PIN_4[] = "Pin 4";
+
+// Shared option strings
+static const char STR_PWM_MODES[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHz Duty;On/Off";
+static const char STR_ON_OFF[] = "Off;On";
+static const char STR_FAILSAFE_MODES[] = "No Pulses;Last Pos;Custom";
+
+// Main folder
 static struct luaItem_folder luaMappingFolder = {
     {"Output Mapping", CRSF_FOLDER},
 };
 
-static struct luaItem_int8 luaMappingChannelOut = {
-  {"Output Ch", CRSF_UINT8},
-  {
-    {
-      (uint8_t)5,       // value - start on AUX1, value is 1-16, not zero-based
-      1,                // min
-      PWM_MAX_CHANNELS, // max
+// Pin folders (static - no runtime allocation)
+static struct luaItem_folder luaPinFolder0 = {{STR_PIN_1, CRSF_FOLDER}};
+static struct luaItem_folder luaPinFolder1 = {{STR_PIN_2, CRSF_FOLDER}};
+static struct luaItem_folder luaPinFolder2 = {{STR_PIN_3, CRSF_FOLDER}};
+static struct luaItem_folder luaPinFolder3 = {{STR_PIN_4, CRSF_FOLDER}};
+
+// Macros to define parameters for one pin
+#define PWM_INPUT_CH_PARAM(n) \
+    static struct luaItem_int8 luaPwmInputCh##n = { \
+        {STR_INPUT_CH, CRSF_UINT8}, \
+        {{1, 1, CRSF_NUM_CHANNELS}}, \
+        STR_EMPTYSPACE \
     }
-  },
-  STR_EMPTYSPACE
-};
 
-static struct luaItem_int8 luaMappingChannelIn = {
-  {"Input Ch", CRSF_UINT8},
-  {
-    {
-      0,                 // value
-      1,                 // min
-      CRSF_NUM_CHANNELS, // max
+#define PWM_OUTPUT_MODE_PARAM(n) \
+    static struct luaItem_selection luaPwmMode##n = { \
+        {STR_OUTPUT_MODE, CRSF_TEXT_SELECTION}, \
+        0, \
+        STR_PWM_MODES, \
+        STR_EMPTYSPACE \
     }
-  },
-  STR_EMPTYSPACE
-};
 
-static struct luaItem_selection luaMappingOutputMode = {
-    {"Output Mode", CRSF_TEXT_SELECTION},
-    0, // value
-    pwmModes,
-    STR_EMPTYSPACE
-};
+#define PWM_INVERT_PARAM(n) \
+    static struct luaItem_selection luaPwmInvert##n = { \
+        {STR_INVERT, CRSF_TEXT_SELECTION}, \
+        0, \
+        STR_ON_OFF, \
+        STR_EMPTYSPACE \
+    }
 
-static struct luaItem_selection luaMappingInverted = {
-    {"Invert", CRSF_TEXT_SELECTION},
-    0, // value
-    "Off;On",
-    STR_EMPTYSPACE
-};
+#define PWM_NARROW_PARAM(n) \
+    static struct luaItem_selection luaPwmNarrow##n = { \
+        {STR_NARROW, CRSF_TEXT_SELECTION}, \
+        0, \
+        STR_ON_OFF, \
+        STR_EMPTYSPACE \
+    }
 
-static struct luaItem_command luaSetFailsafe = {
-    {"Set Failsafe Pos", CRSF_COMMAND},
-    lcsIdle, // step
-    STR_EMPTYSPACE
-};
+#define PWM_FAILSAFE_MODE_PARAM(n) \
+    static struct luaItem_selection luaPwmFailsafeMode##n = { \
+        {STR_FAILSAFE_MODE, CRSF_TEXT_SELECTION}, \
+        0, \
+        STR_FAILSAFE_MODES, \
+        STR_EMPTYSPACE \
+    }
+
+#define PWM_FAILSAFE_VAL_PARAM(n) \
+    static struct luaItem_int16 luaPwmFailsafeVal##n = { \
+        {STR_FAILSAFE_VAL, CRSF_UINT16}, \
+        {{1500, 988, 2012}}, \
+        "us" \
+    }
+
+// Expand for all pins
+PWM_INPUT_CH_PARAM(0);
+PWM_INPUT_CH_PARAM(1);
+PWM_INPUT_CH_PARAM(2);
+PWM_INPUT_CH_PARAM(3);
+
+PWM_OUTPUT_MODE_PARAM(0);
+PWM_OUTPUT_MODE_PARAM(1);
+PWM_OUTPUT_MODE_PARAM(2);
+PWM_OUTPUT_MODE_PARAM(3);
+
+PWM_INVERT_PARAM(0);
+PWM_INVERT_PARAM(1);
+PWM_INVERT_PARAM(2);
+PWM_INVERT_PARAM(3);
+
+PWM_NARROW_PARAM(0);
+PWM_NARROW_PARAM(1);
+PWM_NARROW_PARAM(2);
+PWM_NARROW_PARAM(3);
+
+PWM_FAILSAFE_MODE_PARAM(0);
+PWM_FAILSAFE_MODE_PARAM(1);
+PWM_FAILSAFE_MODE_PARAM(2);
+PWM_FAILSAFE_MODE_PARAM(3);
+
+PWM_FAILSAFE_VAL_PARAM(0);
+PWM_FAILSAFE_VAL_PARAM(1);
+PWM_FAILSAFE_VAL_PARAM(2);
+PWM_FAILSAFE_VAL_PARAM(3);
+
+// Generic callbacks - use pointer comparison to determine pin
+
+static void pwmInputChCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmInputCh0.common) ? 0 :
+                  (item == &luaPwmInputCh1.common) ? 1 :
+                  (item == &luaPwmInputCh2.common) ? 2 : 3;
+
+    if (arg == 0 || arg > CRSF_NUM_CHANNELS) return;
+
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.val.inputChannel = arg - 1;
+    config.SetPwmChannelRaw(pin, cfg.raw.raw);
+    devicesTriggerEvent();
+}
+
+static void pwmModeCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmMode0.common) ? 0 :
+                  (item == &luaPwmMode1.common) ? 1 :
+                  (item == &luaPwmMode2.common) ? 2 : 3;
+
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.val.mode = arg;
+    config.SetPwmChannelRaw(pin, cfg.raw.raw);
+    devicesTriggerEvent();
+}
+
+static void pwmInvertCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmInvert0.common) ? 0 :
+                  (item == &luaPwmInvert1.common) ? 1 :
+                  (item == &luaPwmInvert2.common) ? 2 : 3;
+
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.val.inverted = arg;
+    config.SetPwmChannelRaw(pin, cfg.raw.raw);
+    devicesTriggerEvent();
+}
+
+static void pwmNarrowCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmNarrow0.common) ? 0 :
+                  (item == &luaPwmNarrow1.common) ? 1 :
+                  (item == &luaPwmNarrow2.common) ? 2 : 3;
+
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.val.narrow = arg;
+    config.SetPwmChannelRaw(pin, cfg.raw.raw);
+    devicesTriggerEvent();
+}
+
+static void pwmFailsafeModeCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmFailsafeMode0.common) ? 0 :
+                  (item == &luaPwmFailsafeMode1.common) ? 1 :
+                  (item == &luaPwmFailsafeMode2.common) ? 2 : 3;
+
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.val.failsafeMode = arg;
+    config.SetPwmChannelRaw(pin, cfg.raw.raw);
+    devicesTriggerEvent();
+}
+
+static void pwmFailsafeValCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmFailsafeVal0.common) ? 0 :
+                  (item == &luaPwmFailsafeVal1.common) ? 1 :
+                  (item == &luaPwmFailsafeVal2.common) ? 2 : 3;
+
+    if (arg < 988 || arg > 2012) return;
+
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.val.failsafe = arg - 988;  // Stored as offset from 988us
+    config.SetPwmChannelRaw(pin, cfg.raw.raw);
+    devicesTriggerEvent();
+}
 
 #endif // GPIO_PIN_PWM_OUTPUTS
 
@@ -198,7 +339,11 @@ static struct luaItem_command luaBindMode = {
     STR_EMPTYSPACE
 };
 
+// Old PWM callbacks removed - replaced with minimal per-pin callbacks above
+
 #if defined(GPIO_PIN_PWM_OUTPUTS)
+// Old callback code removed
+#if 0
 static void luaparamMappingChannelOut(struct luaPropertiesCommon *item, uint8_t arg)
 {
     bool sclAssigned = false;
@@ -490,6 +635,7 @@ static void luaparamSetFailsafe(struct luaPropertiesCommon *item, uint8_t arg)
 
   sendLuaCommandResponse((struct luaItem_command *)item, newStep, msg);
 }
+#endif // #if 0 - old callback code
 
 #endif // GPIO_PIN_PWM_OUTPUTS
 
@@ -578,13 +724,41 @@ static void registerLuaParameters()
 #if defined(GPIO_PIN_PWM_OUTPUTS)
   if (OPT_HAS_SERVO_OUTPUT)
   {
-    luaparamMappingChannelOut(&luaMappingOutputMode.common, luaMappingChannelOut.properties.u.value);
+    // Register main Output Mapping folder
     registerLUAParameter(&luaMappingFolder);
-    registerLUAParameter(&luaMappingChannelOut, &luaparamMappingChannelOut, luaMappingFolder.common.id);
-    registerLUAParameter(&luaMappingChannelIn, &luaparamMappingChannelIn, luaMappingFolder.common.id);
-    registerLUAParameter(&luaMappingOutputMode, &luaparamMappingOutputMode, luaMappingFolder.common.id);
-    registerLUAParameter(&luaMappingInverted, &luaparamMappingInverted, luaMappingFolder.common.id);
-    registerLUAParameter(&luaSetFailsafe, &luaparamSetFailsafe);
+
+    // Register per-pin folders and all parameters for each pin
+    registerLUAParameter(&luaPinFolder0, nullptr, luaMappingFolder.common.id);
+    registerLUAParameter(&luaPwmInputCh0, &pwmInputChCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmMode0, &pwmModeCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmInvert0, &pwmInvertCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmNarrow0, &pwmNarrowCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmFailsafeMode0, &pwmFailsafeModeCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmFailsafeVal0, &pwmFailsafeValCallback, luaPinFolder0.common.id);
+
+    registerLUAParameter(&luaPinFolder1, nullptr, luaMappingFolder.common.id);
+    registerLUAParameter(&luaPwmInputCh1, &pwmInputChCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmMode1, &pwmModeCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmInvert1, &pwmInvertCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmNarrow1, &pwmNarrowCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmFailsafeMode1, &pwmFailsafeModeCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmFailsafeVal1, &pwmFailsafeValCallback, luaPinFolder1.common.id);
+
+    registerLUAParameter(&luaPinFolder2, nullptr, luaMappingFolder.common.id);
+    registerLUAParameter(&luaPwmInputCh2, &pwmInputChCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmMode2, &pwmModeCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmInvert2, &pwmInvertCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmNarrow2, &pwmNarrowCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmFailsafeMode2, &pwmFailsafeModeCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmFailsafeVal2, &pwmFailsafeValCallback, luaPinFolder2.common.id);
+
+    registerLUAParameter(&luaPinFolder3, nullptr, luaMappingFolder.common.id);
+    registerLUAParameter(&luaPwmInputCh3, &pwmInputChCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmMode3, &pwmModeCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmInvert3, &pwmInvertCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmNarrow3, &pwmNarrowCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmFailsafeMode3, &pwmFailsafeModeCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmFailsafeVal3, &pwmFailsafeValCallback, luaPinFolder3.common.id);
   }
 #endif
 
@@ -648,10 +822,38 @@ static int event()
 #if defined(GPIO_PIN_PWM_OUTPUTS)
   if (OPT_HAS_SERVO_OUTPUT)
   {
-    const rx_config_pwm_t *pwmCh = config.GetPwmChannel(luaMappingChannelOut.properties.u.value - 1);
-    setLuaUint8Value(&luaMappingChannelIn, pwmCh->val.inputChannel + 1);
-    setLuaTextSelectionValue(&luaMappingOutputMode, pwmCh->val.mode);
-    setLuaTextSelectionValue(&luaMappingInverted, pwmCh->val.inverted);
+    // Load current values from config for all pins
+    const rx_config_pwm_t *cfg0 = config.GetPwmChannel(0);
+    setLuaUint8Value(&luaPwmInputCh0, cfg0->val.inputChannel + 1);
+    setLuaTextSelectionValue(&luaPwmMode0, cfg0->val.mode);
+    setLuaTextSelectionValue(&luaPwmInvert0, cfg0->val.inverted);
+    setLuaTextSelectionValue(&luaPwmNarrow0, cfg0->val.narrow);
+    setLuaTextSelectionValue(&luaPwmFailsafeMode0, cfg0->val.failsafeMode);
+    setLuaUint16Value(&luaPwmFailsafeVal0, cfg0->val.failsafe + 988);
+
+    const rx_config_pwm_t *cfg1 = config.GetPwmChannel(1);
+    setLuaUint8Value(&luaPwmInputCh1, cfg1->val.inputChannel + 1);
+    setLuaTextSelectionValue(&luaPwmMode1, cfg1->val.mode);
+    setLuaTextSelectionValue(&luaPwmInvert1, cfg1->val.inverted);
+    setLuaTextSelectionValue(&luaPwmNarrow1, cfg1->val.narrow);
+    setLuaTextSelectionValue(&luaPwmFailsafeMode1, cfg1->val.failsafeMode);
+    setLuaUint16Value(&luaPwmFailsafeVal1, cfg1->val.failsafe + 988);
+
+    const rx_config_pwm_t *cfg2 = config.GetPwmChannel(2);
+    setLuaUint8Value(&luaPwmInputCh2, cfg2->val.inputChannel + 1);
+    setLuaTextSelectionValue(&luaPwmMode2, cfg2->val.mode);
+    setLuaTextSelectionValue(&luaPwmInvert2, cfg2->val.inverted);
+    setLuaTextSelectionValue(&luaPwmNarrow2, cfg2->val.narrow);
+    setLuaTextSelectionValue(&luaPwmFailsafeMode2, cfg2->val.failsafeMode);
+    setLuaUint16Value(&luaPwmFailsafeVal2, cfg2->val.failsafe + 988);
+
+    const rx_config_pwm_t *cfg3 = config.GetPwmChannel(3);
+    setLuaUint8Value(&luaPwmInputCh3, cfg3->val.inputChannel + 1);
+    setLuaTextSelectionValue(&luaPwmMode3, cfg3->val.mode);
+    setLuaTextSelectionValue(&luaPwmInvert3, cfg3->val.inverted);
+    setLuaTextSelectionValue(&luaPwmNarrow3, cfg3->val.narrow);
+    setLuaTextSelectionValue(&luaPwmFailsafeMode3, cfg3->val.failsafeMode);
+    setLuaUint16Value(&luaPwmFailsafeVal3, cfg3->val.failsafe + 988);
   }
 #endif
 
