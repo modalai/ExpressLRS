@@ -18,7 +18,7 @@ static uint8_t luaWarningFlags = 0b00000000; //8 flag, 1 bit for each flag. set 
 static void (*devicePingCallback)() = nullptr;
 #endif
 
-#define LUA_MAX_PARAMS 64
+#define LUA_MAX_PARAMS 96  // Increased for per-pin PWM parameters (4 pins × 14 params = 56, plus ~20 other params)
 static uint8_t parameterType;
 static uint8_t parameterIndex;
 static uint8_t parameterArg;

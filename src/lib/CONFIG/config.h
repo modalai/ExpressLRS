@@ -232,8 +232,9 @@ typedef union {
                   mode:4,         // Output mode (eServoOutputMode)
                   narrow:1,       // Narrow output mode (half pulse width)
                   failsafeMode:2, // failsafe output mode (eServoOutputFailsafeMode)
-                  mapMode:2,      // uses the mapping values to 
-                  unused:7;       // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
+                  mapMode:2,      // uses the mapping values to
+                  requiresArm:1,  // requires arm switch to output signal
+                  unused:6;       // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
 
         uint64_t  mapInVal1:10,   // input value 1 (All these values are right shifted one bit to save space)
                   mapInVal2:10,   // input value 1 (Input values should be CRSF)
