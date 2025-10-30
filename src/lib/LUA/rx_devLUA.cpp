@@ -150,7 +150,7 @@ static const char STR_PIN_4[] = "Pin 4";
 static const char STR_PWM_MODES[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHz Duty;On/Off";
 static const char STR_ON_OFF[] = "Off;On";
 static const char STR_FAILSAFE_MODES[] = "No Pulses;Last Pos;Custom";
-static const char STR_MAP_MODES[] = "Off;3-Point";
+static const char STR_MAP_MODES[] = "Off;Interpolate;Step";
 
 // Main folder
 static struct luaItem_folder luaMappingFolder = {
@@ -206,7 +206,7 @@ static struct luaItem_folder luaPinFolder3 = {{STR_PIN_4, CRSF_FOLDER}};
 #define PWM_FAILSAFE_VAL_PARAM(n) \
     static struct luaItem_int16 luaPwmFailsafeVal##n = { \
         {STR_FAILSAFE_VAL, CRSF_UINT16}, \
-        {{1500, 988, 2012}}, \
+        {{1500, 988, 2100}}, \
         "us" \
     }
 
@@ -279,10 +279,11 @@ PWM_REQUIRES_ARM_PARAM(1);
 PWM_REQUIRES_ARM_PARAM(2);
 PWM_REQUIRES_ARM_PARAM(3);
 
-// Arm PWM command (allows channels with requiresArm to output)
-static struct luaItem_command luaArmPWM = {
-    {"Arm PWM", CRSF_COMMAND},
-    lcsIdle,
+// Arm PWM selection (allows channels with requiresArm to output)
+static struct luaItem_selection luaArmPWM = {
+    {"PWM Armed", CRSF_TEXT_SELECTION},
+    0, // value - starts disarmed
+    "Disarmed;Armed",
     STR_EMPTYSPACE
 };
 
@@ -361,7 +362,7 @@ static void pwmFailsafeValCallback(struct luaPropertiesCommon *item, uint8_t arg
                   (item == &luaPwmFailsafeVal1.common) ? 1 :
                   (item == &luaPwmFailsafeVal2.common) ? 2 : 3;
 
-    if (arg < 988 || arg > 2012) return;
+    if (arg < 988 || arg > 2100) return;
 
     rx_config_pwm_t cfg;
     cfg.raw = config.GetPwmChannel(pin)->raw;
@@ -413,32 +414,12 @@ static void formatMapValues(const rx_config_pwm_t *cfg, char *out)
     snprintf(out, 20, "%016llX", (unsigned long long)packed);
 }
 
-// Arm PWM callback - arms outputs that have requiresArm flag set
+// Arm PWM callback - arms/disarms outputs that have requiresArm flag set
 static void armPWMCallback(struct luaPropertiesCommon *item, uint8_t arg)
 {
-    luaCmdStep_e newStep;
-    const char *msg;
-
-    if (arg == lcsClick)
-    {
-        newStep = lcsAskConfirm;
-        msg = "Arm PWM outputs?";
-    }
-    else if (arg == lcsConfirmed)
-    {
-        newStep = lcsExecuting;
-        msg = "PWM Armed";
-
-        pwmIsArmed = true;
-        devicesTriggerEvent();
-    }
-    else
-    {
-        newStep = lcsIdle;
-        msg = pwmIsArmed ? "Armed" : "Disarmed";
-    }
-
-    sendLuaCommandResponse((struct luaItem_command *)item, newStep, msg);
+    // arg: 0 = Disarmed, 1 = Armed
+    pwmIsArmed = (arg == 1);
+    devicesTriggerEvent();
 }
 
 #endif // GPIO_PIN_PWM_OUTPUTS
@@ -900,11 +881,22 @@ static void registerLuaParameters()
     config.SetBindStorage((rx_config_bindstorage_t)arg);
   });
   registerLUAParameter(&luaBindMode, [](struct luaPropertiesCommon* item, uint8_t arg){
-    // Complete when TX polls for status i.e. going back to idle, because we're going to lose connection
-    if (arg == lcsQuery) {
-      deferExecutionMillis(200, EnterBindingModeSafely);
+    luaCmdStep_e newStep;
+    const char *msg;
+
+    if (arg == lcsClick) {
+      // Execute immediately on click
+      newStep = lcsExecuting;
+      msg = "Entering bind mode";
+      EnterBindingModeSafely();
     }
-    sendLuaCommandResponse(&luaBindMode, arg < 5 ? lcsExecuting : lcsIdle, arg < 5 ? "Entering..." : "");
+    else {
+      // Return to idle on query or any other state
+      newStep = lcsIdle;
+      msg = "";
+    }
+
+    sendLuaCommandResponse(&luaBindMode, newStep, msg);
   });
 
   registerLUAParameter(&luaModelNumber);
@@ -914,10 +906,8 @@ static void registerLuaParameters()
 
 static void updateBindModeLabel()
 {
-  if (config.IsOnLoan())
-    luaBindMode.common.name = "Return Model";
-  else
-    luaBindMode.common.name = "Enter Bind Mode";
+  // Always show "Enter Bind Mode"
+  luaBindMode.common.name = "Enter Bind Mode";
 }
 
 static int event()
@@ -956,6 +946,9 @@ static int event()
 #if defined(GPIO_PIN_PWM_OUTPUTS)
   if (OPT_HAS_SERVO_OUTPUT)
   {
+    // Update PWM Armed status
+    setLuaTextSelectionValue(&luaArmPWM, pwmIsArmed ? 1 : 0);
+
     // Load current values from config for all pins
     const rx_config_pwm_t *cfg0 = config.GetPwmChannel(0);
     setLuaUint8Value(&luaPwmInputCh0, cfg0->val.inputChannel + 1);
