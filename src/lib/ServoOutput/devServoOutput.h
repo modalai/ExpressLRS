@@ -18,9 +18,12 @@ extern bool updatePWM;
 extern rx_pwm_config_in pwmInput;
 extern bool overridePWM;
 extern pwm_val_override_t pwmOverride;
+extern bool pwmIsArmed;
 
 // Notify this unit that new channel data has arrived
 void servoNewChannelsAvailable();
+// Re-initialize PWM outputs (called when configuration changes)
+void reinitializePWM();
 #else
 inline void servoNewChannelsAvailable(){};
 #endif

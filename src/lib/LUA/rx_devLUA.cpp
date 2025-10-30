@@ -279,6 +279,13 @@ PWM_REQUIRES_ARM_PARAM(1);
 PWM_REQUIRES_ARM_PARAM(2);
 PWM_REQUIRES_ARM_PARAM(3);
 
+// Arm PWM command (allows channels with requiresArm to output)
+static struct luaItem_command luaArmPWM = {
+    {"Arm PWM", CRSF_COMMAND},
+    lcsIdle,
+    STR_EMPTYSPACE
+};
+
 // Generic callbacks - use pointer comparison to determine pin
 
 static void pwmInputChCallback(struct luaPropertiesCommon *item, uint8_t arg)
@@ -404,6 +411,34 @@ static void formatMapValues(const rx_config_pwm_t *cfg, char *out)
 
     // Format as 16-character hex string
     snprintf(out, 20, "%016llX", (unsigned long long)packed);
+}
+
+// Arm PWM callback - arms outputs that have requiresArm flag set
+static void armPWMCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    luaCmdStep_e newStep;
+    const char *msg;
+
+    if (arg == lcsClick)
+    {
+        newStep = lcsAskConfirm;
+        msg = "Arm PWM outputs?";
+    }
+    else if (arg == lcsConfirmed)
+    {
+        newStep = lcsExecuting;
+        msg = "PWM Armed";
+
+        pwmIsArmed = true;
+        devicesTriggerEvent();
+    }
+    else
+    {
+        newStep = lcsIdle;
+        msg = pwmIsArmed ? "Armed" : "Disarmed";
+    }
+
+    sendLuaCommandResponse((struct luaItem_command *)item, newStep, msg);
 }
 
 #endif // GPIO_PIN_PWM_OUTPUTS
@@ -808,6 +843,9 @@ static void registerLuaParameters()
 #if defined(GPIO_PIN_PWM_OUTPUTS)
   if (OPT_HAS_SERVO_OUTPUT)
   {
+    // Register Arm PWM command at root level (visible like Bind Mode)
+    registerLUAParameter(&luaArmPWM, &armPWMCallback);
+
     // Register main Output Mapping folder
     registerLUAParameter(&luaMappingFolder);
 

@@ -18,6 +18,10 @@ const uint8_t RMT_MAX_CHANNELS = 8;
 
 // true when the RX has a new channels packet
 static bool newChannelsAvailable;
+// true when PWM outputs have been armed (allows outputs with requiresArm flag)
+bool pwmIsArmed = false;
+// Hash of PWM config to detect changes
+static uint32_t pwmConfigHash = 0;
 // Absolute max failsafe time if no update is received, regardless of LQ
 static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
 
@@ -29,6 +33,24 @@ static uint16_t interpolate(uint16_t x, uint16_t x1, uint16_t y1, uint16_t x2, u
     float ratio = (float)(x - x1) / (float)(x2 - x1);
     float val   = (float)y1 + ratio * (float)(y2 - y1);
     return (uint16_t)val;
+}
+
+// Simple hash function to detect PWM config changes
+static uint32_t computePwmConfigHash()
+{
+    uint32_t hash = 0;
+    for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+    {
+        const rx_config_pwm_t *cfg = config.GetPwmChannel(ch);
+        // Hash the raw config value (includes all fields)
+        // cfg->raw.raw is an array of 3 uint32_t values
+        for (int i = 0; i < 3; ++i)
+        {
+            hash ^= cfg->raw.raw[i];
+            hash = (hash << 5) | (hash >> 27); // Rotate left by 5
+        }
+    }
+    return hash;
 }
 
 static uint16_t mapChannelValue(const rx_config_pwm_t *cfg, uint16_t input_crsf)
@@ -156,6 +178,36 @@ static void servosFailsafe()
     }
 }
 
+static void servosInitialFailsafe()
+{
+    // Set all enabled PWM outputs to failsafe on boot
+    // This ensures predictable startup behavior before connection
+    constexpr unsigned SERVO_FAILSAFE_MIN = 800U;
+    for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
+    {
+        // Skip pins that aren't allocated
+        if (servoPins[ch] == UNDEF_PIN && pwmChannels[ch] == -1
+#if defined(PLATFORM_ESP32)
+            && dshotInstances[ch] == nullptr
+#endif
+        ) {
+            continue;
+        }
+
+        const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
+        if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION) {
+            uint16_t us = chConfig->val.failsafe + SERVO_FAILSAFE_MIN;
+            servoWrite(ch, us);
+            DBGLN("Initial failsafe ch %d: %u us", ch, us);
+        }
+        else if (chConfig->val.failsafeMode == PWMFAILSAFE_NO_PULSES) {
+            servoWrite(ch, 0);
+            DBGLN("Initial failsafe ch %d: no pulses", ch);
+        }
+        // For LAST_POSITION mode on boot, we'll keep outputs low until first valid signal
+    }
+}
+
 static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
@@ -169,6 +221,22 @@ static void servosUpdate(unsigned long now)
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
+
+            // If channel requires arming and we're not armed, send failsafe instead
+            if (chConfig->val.requiresArm && !pwmIsArmed)
+            {
+                constexpr unsigned SERVO_FAILSAFE_MIN = 800U;
+                if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION) {
+                    uint16_t us = chConfig->val.failsafe + SERVO_FAILSAFE_MIN;
+                    servoWrite(ch, us);
+                }
+                else if (chConfig->val.failsafeMode == PWMFAILSAFE_NO_PULSES) {
+                    servoWrite(ch, 0);
+                }
+                // For LAST_POSITION, do nothing - keep last value
+                continue;
+            }
+
             const unsigned crsfVal = ChannelData[chConfig->val.inputChannel];
             // crsfVal might 0 if this is a switch channel, and it has not been
             // received yet. Delay initializing the servo until the channel is valid
@@ -178,7 +246,7 @@ static void servosUpdate(unsigned long now)
             }
 
             uint16_t us = mapChannelValue(chConfig, crsfVal);
-            
+
             // Flip the output around the mid-value if inverted
             // (1500 - usOutput) + 1500
             if (chConfig->val.inverted)
@@ -286,11 +354,27 @@ static int start()
         }
 #endif
     }
+
+    // Set all enabled outputs to failsafe on boot (before connection)
+    servosInitialFailsafe();
+
+    // Compute initial config hash for change detection
+    pwmConfigHash = computePwmConfigHash();
+
     return DURATION_NEVER;
 }
 
 static int event()
 {
+    // Check for PWM config changes (triggered by devicesTriggerEvent() from Lua callbacks)
+    uint32_t newHash = computePwmConfigHash();
+    if (newHash != pwmConfigHash)
+    {
+        DBGLN("PWM config changed (hash: 0x%08X -> 0x%08X), reinitializing", pwmConfigHash, newHash);
+        pwmConfigHash = newHash;
+        reinitializePWM();
+    }
+
     // Change pwm config from telemetry command
     if (updatePWM){
         updatePWM = false;
@@ -389,6 +473,111 @@ static int timeout()
 {
     servosUpdate(millis());
     return DURATION_IMMEDIATELY;
+}
+
+void reinitializePWM()
+{
+    if (!OPT_HAS_SERVO_OUTPUT)
+    {
+        return;
+    }
+
+    DBGLN("Reinitializing PWM outputs due to config change");
+
+    // Release all current PWM allocations
+    for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+    {
+        if (pwmChannels[ch] != -1)
+        {
+            PWM.release(pwmChannels[ch]);
+            pwmChannels[ch] = -1;
+        }
+#if defined(PLATFORM_ESP32)
+        if (dshotInstances[ch] != nullptr)
+        {
+            delete dshotInstances[ch];
+            dshotInstances[ch] = nullptr;
+        }
+#endif
+        pwmChannelValues[ch] = UINT16_MAX;
+        pwmInputChannels[ch] = -1;
+    }
+
+    // Re-run initialization logic
+#if defined(PLATFORM_ESP32)
+    uint8_t rmtCH = 0;
+#endif
+    for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+    {
+        int8_t pin = GPIO_PIN_PWM_OUTPUTS[ch];
+#if (defined(DEBUG_LOG) || defined(DEBUG_RCVR_LINKSTATS)) && (defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32))
+        if (pin == U0RXD_GPIO_NUM || pin == U0TXD_GPIO_NUM)
+        {
+            pin = UNDEF_PIN;
+        }
+#endif
+        auto mode = (eServoOutputMode)config.GetPwmChannel(ch)->val.mode;
+        if (mode >= somSerial)
+        {
+            pin = UNDEF_PIN;
+        }
+#if defined(PLATFORM_ESP32)
+        else if (mode == somDShot)
+        {
+            if (rmtCH < RMT_MAX_CHANNELS)
+            {
+                auto gpio = (gpio_num_t)pin;
+                auto rmtChannel = (rmt_channel_t)rmtCH;
+                DBGLN("Reinitializing DShot: gpio: %u, ch: %d, rmtChannel: %u", gpio, ch, rmtChannel);
+                pinMode(pin, OUTPUT);
+                dshotInstances[ch] = new DShotRMT(gpio, rmtChannel);
+                rmtCH++;
+            }
+            pin = UNDEF_PIN;
+        }
+#endif
+        servoPins[ch] = pin;
+        if (pin != UNDEF_PIN)
+        {
+            if (mode == somOnOff)
+            {
+                DBGLN("Reinitializing digital output: ch: %d, pin: %d", ch, pin);
+            }
+            else
+            {
+                DBGLN("Reinitializing PWM output: ch: %d, pin: %d", ch, pin);
+            }
+#ifndef M0139
+            pinMode(pin, OUTPUT);
+            digitalWrite(pin, LOW);
+#endif
+        }
+    }
+
+    // Re-allocate PWM channels with new configuration
+    for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+    {
+        const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
+        auto frequency = servoOutputModeToFrequency((eServoOutputMode)chConfig->val.mode);
+        if (frequency && servoPins[ch] != UNDEF_PIN)
+        {
+            pwmChannels[ch] = PWM.allocate(servoPins[ch], frequency);
+            pwmInputChannels[ch] = chConfig->val.inputChannel;
+        }
+#if defined(PLATFORM_ESP32)
+        else if (((eServoOutputMode)chConfig->val.mode) == somDShot)
+        {
+            dshotInstances[ch]->begin(DSHOT300, false);
+            dshotInstances[ch]->send_dshot_value(0);
+        }
+#endif
+    }
+
+    // Apply failsafe to all outputs after reinitialization
+    servosInitialFailsafe();
+
+    // Update config hash to reflect new state
+    pwmConfigHash = computePwmConfigHash();
 }
 
 device_t ServoOut_device = {
