@@ -118,8 +118,14 @@ static struct luaItem_string luaModelNumber = {
     0  // CRSF_INFO type, no max length needed
 };
 
-static struct luaItem_string luaELRSversion = {
-    {version, CRSF_INFO},
+static struct luaItem_string luaVersion = {
+    {"Version", CRSF_INFO},
+    version,
+    0  // CRSF_INFO type, no max length needed
+};
+
+static struct luaItem_string luaCommitHash = {
+    {"Commit Hash", CRSF_INFO},
     commit,
     0  // CRSF_INFO type, no max length needed
 };
@@ -995,7 +1001,8 @@ static void registerLuaParameters()
   });
 
   registerLUAParameter(&luaModelNumber);
-  registerLUAParameter(&luaELRSversion);
+  registerLUAParameter(&luaVersion);
+  registerLUAParameter(&luaCommitHash);
   registerLUAParameter(nullptr);
 }
 
