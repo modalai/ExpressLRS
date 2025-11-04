@@ -116,6 +116,7 @@ struct luaItem_float {
 struct luaItem_string {
     struct luaPropertiesCommon common;
     const char* value;
+    uint8_t maxlen;  // Maximum string length (for CRSF_STRING type only, set to 0 for CRSF_INFO)
 } PACKED;
 
 struct luaItem_folder {
@@ -144,8 +145,10 @@ void sendLuaCommandResponse(struct luaItem_command *cmd, luaCmdStep_e step, cons
 
 extern uint8_t getLuaParamCount();
 extern void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg);
+extern void luaParamUpdateReqData(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data);
 #ifdef TARGET_RX
 extern void luaParamUpdateReqSerial(uint8_t type, uint8_t index, uint8_t arg, void (*callback)(uint8_t*));
+extern void luaParamUpdateReqSerialData(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data, void (*callback)(uint8_t*));
 #endif
 extern bool luaHandleUpdateParameter();
 

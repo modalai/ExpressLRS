@@ -90,6 +90,7 @@ public:
     uint8_t GetParameterRequestType() { return paramRequestType; }
     uint8_t GetParameterRequestIndex() { return paramRequestIndex; }
     uint8_t GetParameterRequestArg() { return paramRequestArg; }
+    const uint8_t* GetParameterRequestData() { return CRSFinBuffer; }  // Returns full packet for STRING parameter writes
 #if defined(TARGET_RX)
     rx_pwm_config_in GetPwmInput(){ return pwmInput;}
     pwm_val_override_t GetPwmOverride(){ return pwmValueOverride; }

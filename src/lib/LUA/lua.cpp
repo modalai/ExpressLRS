@@ -22,6 +22,7 @@ static void (*devicePingCallback)() = nullptr;
 static uint8_t parameterType;
 static uint8_t parameterIndex;
 static uint8_t parameterArg;
+static const uint8_t *parameterData = nullptr;  // Pointer to full packet data for STRING writes
 static volatile bool UpdateParamReq = false;
 #ifdef TARGET_RX
 // Callback for sending parameter responses to serial port (if set, responses go to serial instead of telemetry)
@@ -121,7 +122,13 @@ static uint8_t *luaInt16StructToArray(const void *luaStruct, uint8_t *next)
 static uint8_t *luaStringStructToArray(const void *luaStruct, uint8_t *next)
 {
   const struct luaItem_string *p1 = (const struct luaItem_string *)luaStruct;
-  return (uint8_t *)stpcpy((char *)next, p1->value);
+  next = (uint8_t *)stpcpy((char *)next, p1->value);
+  // For CRSF_STRING type (writable strings), append the max_length byte AFTER the null terminator
+  if (p1->maxlen > 0) {
+    next++;  // Skip past the null terminator
+    *next++ = p1->maxlen;
+  }
+  return next;
 }
 static uint8_t *luaFolderStructToArray(const void *luaStruct, uint8_t *next)
 {
@@ -384,6 +391,20 @@ void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg)
   parameterType = type;
   parameterIndex = index;
   parameterArg = arg;
+  parameterData = nullptr;  // No data pointer for legacy calls
+  UpdateParamReq = true;
+#ifdef TARGET_RX
+  paramSerialOutputCallback = nullptr; // Default to OTA request (telemetry)
+#endif
+}
+
+// Extended version that accepts full packet data (for STRING parameter writes)
+void luaParamUpdateReqData(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data)
+{
+  parameterType = type;
+  parameterIndex = index;
+  parameterArg = arg;
+  parameterData = data;  // Store pointer to full packet data
   UpdateParamReq = true;
 #ifdef TARGET_RX
   paramSerialOutputCallback = nullptr; // Default to OTA request (telemetry)
@@ -397,6 +418,20 @@ void luaParamUpdateReqSerial(uint8_t type, uint8_t index, uint8_t arg, void (*ca
   parameterType = type;
   parameterIndex = index;
   parameterArg = arg;
+  parameterData = nullptr;  // Legacy serial call, no data pointer
+  UpdateParamReq = true;
+  paramSerialOutputCallback = callback; // Set callback for serial output
+  DBGLN("UpdateParamReq set to true, paramSerialOutputCallback=%p", paramSerialOutputCallback);
+}
+
+// Extended version for serial requests that includes packet data (for STRING writes)
+void luaParamUpdateReqSerialData(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data, void (*callback)(uint8_t*))
+{
+  DBGLN("luaParamUpdateReqSerialData: type=0x%02X, index=%d, arg=%d, data=%p, callback=%p", type, index, arg, data, callback);
+  parameterType = type;
+  parameterIndex = index;
+  parameterArg = arg;
+  parameterData = data;  // Store pointer to packet data for STRING parameter extraction
   UpdateParamReq = true;
   paramSerialOutputCallback = callback; // Set callback for serial output
   DBGLN("UpdateParamReq set to true, paramSerialOutputCallback=%p", paramSerialOutputCallback);
@@ -473,15 +508,40 @@ bool luaHandleUpdateParameter()
         uint8_t id = parameterIndex;
         uint8_t arg = parameterArg;
         struct luaPropertiesCommon *p = paramDefinitions[id];
-        DBGLN("Set Lua [%s]=%u", p->name, arg);
-        if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
-          // While the command is executing, the handset will send `WRITE state=lcsQuery`.
-          // paramCallbacks will set the value when nextStatusChunk == 0, or send any
-          // remaining chunks when nextStatusChunk != 0
-          if (arg == lcsQuery && nextStatusChunk != 0) {
-            pushResponseChunk((struct luaItem_command *)p);
-          } else {
-            paramCallbacks[id](p, arg);
+
+        // Handle STRING parameter writes specially
+        uint8_t dataType = p->type & CRSF_FIELD_TYPE_MASK;
+          if (dataType == CRSF_STRING && parameterData != nullptr) {
+          // Extract string from packet data
+          // CRSF_TELEMETRY_FIELD_CHUNK_INDEX points to the arg byte
+          // String data starts at the NEXT byte (index + 1)
+          struct luaItem_string *stringParam = (struct luaItem_string *)p;
+          const char *newValue = (const char *)&parameterData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1];
+          DBGLN("Set Lua STRING [%s]='%s' (len=%u)", p->name, newValue, strlen(newValue));
+
+          // Update the string value in the parameter structure
+          // Note: This assumes the string buffer is writable and large enough
+          // The callback will read from stringParam->value
+          size_t copyLen = stringParam->maxlen + 1; // +1 for null terminator
+          strlcpy((char *)stringParam->value, newValue, copyLen);
+          DBGLN("Copied to param buffer: '%s' (len=%u)", stringParam->value, strlen(stringParam->value));
+
+          // Call the callback if registered
+          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
+            paramCallbacks[id](p, 0);  // arg is not used for STRING types
+          }
+        } else {
+          // Handle numeric parameter writes
+          DBGLN("Set Lua [%s]=%u", p->name, arg);
+          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
+            // While the command is executing, the handset will send `WRITE state=lcsQuery`.
+            // paramCallbacks will set the value when nextStatusChunk == 0, or send any
+            // remaining chunks when nextStatusChunk != 0
+            if (arg == lcsQuery && nextStatusChunk != 0) {
+              pushResponseChunk((struct luaItem_command *)p);
+            } else {
+              paramCallbacks[id](p, arg);
+            }
           }
         }
       }

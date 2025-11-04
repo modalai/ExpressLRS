@@ -13,6 +13,8 @@ extern void reconfigureSerial();
 extern void reconfigureSerial1();
 #endif
 extern bool BindingModeRequest;
+extern void EnterBindingModeSafely();
+extern void EnterUnbindMode();
 
 static char modelString[] = "000";
 
@@ -112,12 +114,14 @@ static struct luaItem_selection luaTeamracePosition = {
 
 static struct luaItem_string luaModelNumber = {
     {"Model Id", CRSF_INFO},
-    modelString
+    modelString,
+    0  // CRSF_INFO type, no max length needed
 };
 
 static struct luaItem_string luaELRSversion = {
     {version, CRSF_INFO},
-    commit
+    commit,
+    0  // CRSF_INFO type, no max length needed
 };
 
 //----------------------------Info-----------------------------------
@@ -167,7 +171,7 @@ static struct luaItem_folder luaPinFolder3 = {{STR_PIN_4, CRSF_FOLDER}};
 #define PWM_INPUT_CH_PARAM(n) \
     static struct luaItem_int8 luaPwmInputCh##n = { \
         {STR_INPUT_CH, CRSF_UINT8}, \
-        {{1, 1, CRSF_NUM_CHANNELS}}, \
+        {{(uint8_t)1, (uint8_t)1, (uint8_t)CRSF_NUM_CHANNELS}}, \
         STR_EMPTYSPACE \
     }
 
@@ -206,7 +210,7 @@ static struct luaItem_folder luaPinFolder3 = {{STR_PIN_4, CRSF_FOLDER}};
 #define PWM_FAILSAFE_VAL_PARAM(n) \
     static struct luaItem_int16 luaPwmFailsafeVal##n = { \
         {STR_FAILSAFE_VAL, CRSF_UINT16}, \
-        {{1500, 988, 2100}}, \
+        {{(uint16_t)1500, (uint16_t)988, (uint16_t)2100}}, \
         "us" \
     }
 
@@ -221,8 +225,9 @@ static struct luaItem_folder luaPinFolder3 = {{STR_PIN_4, CRSF_FOLDER}};
 #define PWM_MAP_VALUES_PARAM(n) \
     static char luaPwmMapValuesStr##n[20]; \
     static struct luaItem_string luaPwmMapValues##n = { \
-        {"Map Values", CRSF_INFO}, \
-        luaPwmMapValuesStr##n \
+        {"Map Values", CRSF_STRING}, \
+        luaPwmMapValuesStr##n, \
+        16  /* max length of hex string */ \
     }
 
 #define PWM_REQUIRES_ARM_PARAM(n) \
@@ -398,20 +403,85 @@ static void pwmRequiresArmCallback(struct luaPropertiesCommon *item, uint8_t arg
     devicesTriggerEvent();
 }
 
-// Format map values as hex string (63 bits packed into 8 bytes = 16 hex chars)
+// Format map values as hex string (64 bits from raw[1] and raw[2])
 static void formatMapValues(const rx_config_pwm_t *cfg, char *out)
 {
-    // Pack all map values into 64 bits (8 bytes)
-    uint64_t packed = 0;
-    packed |= ((uint64_t)cfg->val.mapInVal1 & 0x3FF) << 0;   // bits 0-9
-    packed |= ((uint64_t)cfg->val.mapInVal2 & 0x3FF) << 10;  // bits 10-19
-    packed |= ((uint64_t)cfg->val.mapInVal3 & 0x3FF) << 20;  // bits 20-29
-    packed |= ((uint64_t)cfg->val.mapOutVal1 & 0x7FF) << 30; // bits 30-40
-    packed |= ((uint64_t)cfg->val.mapOutVal2 & 0x7FF) << 41; // bits 41-51
-    packed |= ((uint64_t)cfg->val.mapOutVal3 & 0x7FF) << 52; // bits 52-62
+    // Read the 64-bit map values directly from the raw array
+    // raw[0] = first 32 bits (failsafe, inputChannel, etc.)
+    // raw[1] = bits 32-63 of the structure (first half of the 64-bit map values)
+    // raw[2] = bits 64-95 of the structure (second half of the 64-bit map values)
+    uint64_t packed = ((uint64_t)cfg->raw.raw[2] << 32) | cfg->raw.raw[1];
 
     // Format as 16-character hex string
-    snprintf(out, 20, "%016llX", (unsigned long long)packed);
+    static const char hexChars[] = "0123456789ABCDEF";
+    for (int i = 15; i >= 0; i--) {
+        out[i] = hexChars[packed & 0xF];
+        packed >>= 4;
+    }
+    out[16] = '\0';  // Null terminator
+}
+
+// Parse hex string and validate, return true if valid
+static bool parseMapValues(const char *hexStr, rx_config_pwm_t *cfg)
+{
+    // Validate hex string length (should be 16 characters)
+    if (strlen(hexStr) != 16) return false;
+
+    // Validate all characters are hex
+    for (int i = 0; i < 16; i++) {
+        char c = hexStr[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) {
+            return false;
+        }
+    }
+
+    // Parse hex string to 64-bit value
+    uint64_t packed = 0;
+    for (int i = 0; i < 16; i++) {
+        char c = hexStr[i];
+        uint8_t nibble;
+        if (c >= '0' && c <= '9') nibble = c - '0';
+        else if (c >= 'A' && c <= 'F') nibble = c - 'A' + 10;
+        else nibble = c - 'a' + 10;
+
+        packed = (packed << 4) | nibble;
+    }
+
+    // Write the 64-bit value directly to the raw array
+    // raw[1] = first 32 bits of the map values (bits 32-63 of the structure)
+    // raw[2] = second 32 bits of the map values (bits 64-95 of the structure)
+    cfg->raw.raw[1] = (uint32_t)(packed & 0xFFFFFFFF);
+    cfg->raw.raw[2] = (uint32_t)(packed >> 32);
+
+    return true;
+}
+
+// Map values callback - parses hex string and updates bitfield
+static void pwmMapValuesCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    uint8_t pin = (item == &luaPwmMapValues0.common) ? 0 :
+                  (item == &luaPwmMapValues1.common) ? 1 :
+                  (item == &luaPwmMapValues2.common) ? 2 : 3;
+
+    // Get the string value from the parameter structure
+    struct luaItem_string *stringItem = (struct luaItem_string *)item;
+    const char *hexStr = stringItem->value;
+
+    DBGLN("pwmMapValuesCallback: pin=%u, hexStr='%s'", pin, hexStr);
+
+    // Get current config and try to parse the hex string
+    rx_config_pwm_t cfg;
+    cfg.raw = config.GetPwmChannel(pin)->raw;
+
+    if (parseMapValues(hexStr, &cfg)) {
+        // Valid hex string - update the config
+        DBGLN("Parsed OK, writing raw[0]=0x%08X, raw[1]=0x%08X, raw[2]=0x%08X",
+              cfg.raw.raw[0], cfg.raw.raw[1], cfg.raw.raw[2]);
+        config.SetPwmChannelRaw(pin, cfg.raw.raw);
+        devicesTriggerEvent();
+    } else {
+        DBGLN("parseMapValues FAILED for '%s'", hexStr);
+    }
 }
 
 // Arm PWM callback - arms/disarms outputs that have requiresArm flag set
@@ -434,6 +504,12 @@ static struct luaItem_selection luaBindStorage = {
 };
 
 static struct luaItem_command luaBindMode = {
+    {STR_EMPTYSPACE, CRSF_COMMAND},
+    lcsIdle, // step
+    STR_EMPTYSPACE
+};
+
+static struct luaItem_command luaUnbindMode = {
     {STR_EMPTYSPACE, CRSF_COMMAND},
     lcsIdle, // step
     STR_EMPTYSPACE
@@ -839,7 +915,7 @@ static void registerLuaParameters()
     registerLUAParameter(&luaPwmFailsafeMode0, &pwmFailsafeModeCallback, luaPinFolder0.common.id);
     registerLUAParameter(&luaPwmFailsafeVal0, &pwmFailsafeValCallback, luaPinFolder0.common.id);
     registerLUAParameter(&luaPwmMapMode0, &pwmMapModeCallback, luaPinFolder0.common.id);
-    registerLUAParameter(&luaPwmMapValues0, nullptr, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmMapValues0, &pwmMapValuesCallback, luaPinFolder0.common.id);
     registerLUAParameter(&luaPwmRequiresArm0, &pwmRequiresArmCallback, luaPinFolder0.common.id);
 
     registerLUAParameter(&luaPinFolder1, nullptr, luaMappingFolder.common.id);
@@ -850,7 +926,7 @@ static void registerLuaParameters()
     registerLUAParameter(&luaPwmFailsafeMode1, &pwmFailsafeModeCallback, luaPinFolder1.common.id);
     registerLUAParameter(&luaPwmFailsafeVal1, &pwmFailsafeValCallback, luaPinFolder1.common.id);
     registerLUAParameter(&luaPwmMapMode1, &pwmMapModeCallback, luaPinFolder1.common.id);
-    registerLUAParameter(&luaPwmMapValues1, nullptr, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmMapValues1, &pwmMapValuesCallback, luaPinFolder1.common.id);
     registerLUAParameter(&luaPwmRequiresArm1, &pwmRequiresArmCallback, luaPinFolder1.common.id);
 
     registerLUAParameter(&luaPinFolder2, nullptr, luaMappingFolder.common.id);
@@ -861,7 +937,7 @@ static void registerLuaParameters()
     registerLUAParameter(&luaPwmFailsafeMode2, &pwmFailsafeModeCallback, luaPinFolder2.common.id);
     registerLUAParameter(&luaPwmFailsafeVal2, &pwmFailsafeValCallback, luaPinFolder2.common.id);
     registerLUAParameter(&luaPwmMapMode2, &pwmMapModeCallback, luaPinFolder2.common.id);
-    registerLUAParameter(&luaPwmMapValues2, nullptr, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmMapValues2, &pwmMapValuesCallback, luaPinFolder2.common.id);
     registerLUAParameter(&luaPwmRequiresArm2, &pwmRequiresArmCallback, luaPinFolder2.common.id);
 
     registerLUAParameter(&luaPinFolder3, nullptr, luaMappingFolder.common.id);
@@ -872,7 +948,7 @@ static void registerLuaParameters()
     registerLUAParameter(&luaPwmFailsafeMode3, &pwmFailsafeModeCallback, luaPinFolder3.common.id);
     registerLUAParameter(&luaPwmFailsafeVal3, &pwmFailsafeValCallback, luaPinFolder3.common.id);
     registerLUAParameter(&luaPwmMapMode3, &pwmMapModeCallback, luaPinFolder3.common.id);
-    registerLUAParameter(&luaPwmMapValues3, nullptr, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmMapValues3, &pwmMapValuesCallback, luaPinFolder3.common.id);
     registerLUAParameter(&luaPwmRequiresArm3, &pwmRequiresArmCallback, luaPinFolder3.common.id);
   }
 #endif
@@ -899,6 +975,25 @@ static void registerLuaParameters()
     sendLuaCommandResponse(&luaBindMode, newStep, msg);
   });
 
+  registerLUAParameter(&luaUnbindMode, [](struct luaPropertiesCommon* item, uint8_t arg){
+    luaCmdStep_e newStep;
+    const char *msg;
+
+    if (arg == lcsClick) {
+      // Execute immediately on click
+      newStep = lcsExecuting;
+      msg = "Entering unbind mode";
+      EnterUnbindMode();
+    }
+    else {
+      // Return to idle on query or any other state
+      newStep = lcsIdle;
+      msg = "";
+    }
+
+    sendLuaCommandResponse(&luaUnbindMode, newStep, msg);
+  });
+
   registerLUAParameter(&luaModelNumber);
   registerLUAParameter(&luaELRSversion);
   registerLUAParameter(nullptr);
@@ -908,6 +1003,12 @@ static void updateBindModeLabel()
 {
   // Always show "Enter Bind Mode"
   luaBindMode.common.name = "Enter Bind Mode";
+}
+
+static void updateUnbindModeLabel()
+{
+  // Always show "Enter Unbind Mode"
+  luaUnbindMode.common.name = "Enter Unbind Mode";
 }
 
 static int event()
@@ -1007,6 +1108,7 @@ static int event()
   }
   setLuaTextSelectionValue(&luaBindStorage, config.GetBindStorage());
   updateBindModeLabel();
+  updateUnbindModeLabel();
 
   if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
   {

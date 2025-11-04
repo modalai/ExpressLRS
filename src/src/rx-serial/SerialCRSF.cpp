@@ -15,6 +15,7 @@ extern Telemetry telemetry;
 extern void reset_into_bootloader();
 extern void UpdateModelMatch(uint8_t model);
 extern void luaParamUpdateReqSerial(uint8_t type, uint8_t index, uint8_t arg, void (*callback)(uint8_t*));
+extern void luaParamUpdateReqSerialData(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data, void (*callback)(uint8_t*));
 
 // Static pointer to current SerialCRSF instance for parameter callback
 static SerialCRSF *currentSerialCRSF = nullptr;
@@ -219,10 +220,11 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
         if (telemetry.ShouldCallParameterRequest())
         {
             DBGLN("Received parameter request via serial");
-            luaParamUpdateReqSerial(
+            luaParamUpdateReqSerialData(
                 telemetry.GetParameterRequestType(),
                 telemetry.GetParameterRequestIndex(),
                 telemetry.GetParameterRequestArg(),
+                telemetry.GetParameterRequestData(),  // Pass full packet data for STRING parameters
                 sendParamToSerial  // Pass callback for serial output
             );
         }

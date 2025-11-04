@@ -103,7 +103,8 @@ static struct luaItem_selection luaFanThreshold = {
 #if defined(Regulatory_Domain_EU_CE_2400)
 static struct luaItem_string luaCELimit = {
     {"100mW CE LIMIT", CRSF_INFO},
-    STR_EMPTYSPACE
+    STR_EMPTYSPACE,
+    0  // CRSF_INFO type, no max length needed
 };
 #endif
 
@@ -147,12 +148,14 @@ static struct luaItem_command luaBind = {
 
 static struct luaItem_string luaInfo = {
     {"Bad/Good", (crsf_value_type_e)(CRSF_INFO | CRSF_FIELD_ELRS_HIDDEN)},
-    STR_EMPTYSPACE
+    STR_EMPTYSPACE,
+    0  // CRSF_INFO type, no max length needed
 };
 
 static struct luaItem_string luaELRSversion = {
     {version_domain, CRSF_INFO},
-    commit
+    commit,
+    0  // CRSF_INFO type, no max length needed
 };
 
 //---------------------------- WiFi -----------------------------
@@ -287,7 +290,9 @@ static struct luaItem_selection luaBackpackTelemetry = {
 
 static struct luaItem_string luaBackpackVersion = {
     {"Version", CRSF_INFO},
-    backpackVersion};
+    backpackVersion,
+    0  // CRSF_INFO type, no max length needed
+};
 
 //---------------------------- BACKPACK ------------------
 
