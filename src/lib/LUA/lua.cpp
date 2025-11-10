@@ -18,7 +18,7 @@ static uint8_t luaWarningFlags = 0b00000000; //8 flag, 1 bit for each flag. set 
 static void (*devicePingCallback)() = nullptr;
 #endif
 
-#define LUA_MAX_PARAMS 96  // Increased for per-pin PWM parameters (4 pins × 14 params = 56, plus ~20 other params)
+#define LUA_MAX_PARAMS 160  // Increased to cover all RX params (PWM mapping, new UID/preset fields, etc.)
 static uint8_t parameterType;
 static uint8_t parameterIndex;
 static uint8_t parameterArg;
@@ -471,6 +471,12 @@ void registerLUAParameter(void *definition, luaCallback callback, uint8_t parent
     *pos++ = 0;
     return;
 #endif
+  }
+
+  if (lastLuaField >= (LUA_MAX_PARAMS - 1))
+  {
+    DBGLN("LUA param limit reached (%u), ignoring '%s'", LUA_MAX_PARAMS, ((struct luaPropertiesCommon *)definition)->name);
+    return;
   }
 
   struct luaPropertiesCommon *p = (struct luaPropertiesCommon *)definition;

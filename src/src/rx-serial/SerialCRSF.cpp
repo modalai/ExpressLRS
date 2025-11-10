@@ -227,6 +227,7 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
                 telemetry.GetParameterRequestData(),  // Pass full packet data for STRING parameters
                 sendParamToSerial  // Pass callback for serial output
             );
+            devicesTriggerEvent(); // wake LUA device so it can service the request immediately
         }
     }
 }

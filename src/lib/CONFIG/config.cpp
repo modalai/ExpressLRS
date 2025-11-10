@@ -6,7 +6,6 @@
 #include "helpers.h"
 #include "logging.h"
 
-
 #if defined(TARGET_TX)
 
 #define MODEL_CHANGED       bit(1)

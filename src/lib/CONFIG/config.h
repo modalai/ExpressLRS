@@ -226,7 +226,7 @@ typedef struct __attribute__((packed)) {
 
 typedef union {
     struct {
-        uint32_t  failsafe:11,    // us output during failsafe +988 (e.g. 512 here would be 1500us)
+        uint32_t  failsafe:11,    // us output during failsafe +800 (e.g. 512 here would be 1500us)
                   inputChannel:4, // 0-based input channel
                   inverted:1,     // invert channel output
                   mode:4,         // Output mode (eServoOutputMode)

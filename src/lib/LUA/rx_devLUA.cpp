@@ -6,6 +6,11 @@
 #include "deferred.h"
 #include "logging.h"
 
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
+
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
 
 extern void reconfigureSerial();
@@ -128,6 +133,13 @@ static struct luaItem_string luaCommitHash = {
     {"Commit Hash", CRSF_INFO},
     commit,
     0  // CRSF_INFO type, no max length needed
+};
+
+static char uidString[(UID_LEN * 2) + 1] = {0};
+static struct luaItem_string luaUid = {
+    {"UID", CRSF_STRING},
+    uidString,
+    UID_LEN * 2  // 2 hex chars per byte
 };
 
 //----------------------------Info-----------------------------------
@@ -285,10 +297,41 @@ PWM_MAP_VALUES_PARAM(1);
 PWM_MAP_VALUES_PARAM(2);
 PWM_MAP_VALUES_PARAM(3);
 
+static constexpr uint16_t PWM_FAILSAFE_OFFSET_US = 800;
+
 PWM_REQUIRES_ARM_PARAM(0);
 PWM_REQUIRES_ARM_PARAM(1);
 PWM_REQUIRES_ARM_PARAM(2);
 PWM_REQUIRES_ARM_PARAM(3);
+
+#define PWM_INPUT_VALUE_STR_LEN 8
+
+#define PWM_INPUT_VALUE_PARAM(n) \
+    static char luaPwmInputValueStr##n[PWM_INPUT_VALUE_STR_LEN] = "----"; \
+    static struct luaItem_string luaPwmInputValue##n = { \
+        {"Input Value", CRSF_STRING}, \
+        luaPwmInputValueStr##n, \
+        6 \
+    }
+
+#define PWM_OUTPUT_VALUE_PARAM(n) \
+    static char luaPwmOutputValueStr##n[12] = "n/a"; \
+    static struct luaItem_string luaPwmOutputValue##n = { \
+        {"Output Value", CRSF_INFO}, \
+        luaPwmOutputValueStr##n, \
+        0 \
+    }
+
+PWM_INPUT_VALUE_PARAM(0);
+PWM_INPUT_VALUE_PARAM(1);
+PWM_INPUT_VALUE_PARAM(2);
+PWM_INPUT_VALUE_PARAM(3);
+
+PWM_OUTPUT_VALUE_PARAM(0);
+PWM_OUTPUT_VALUE_PARAM(1);
+PWM_OUTPUT_VALUE_PARAM(2);
+PWM_OUTPUT_VALUE_PARAM(3);
+
 
 // Arm PWM selection (allows channels with requiresArm to output)
 static struct luaItem_selection luaArmPWM = {
@@ -308,9 +351,13 @@ static void pwmInputChCallback(struct luaPropertiesCommon *item, uint8_t arg)
 
     if (arg == 0 || arg > CRSF_NUM_CHANNELS) return;
 
+    uint8_t desiredChannel = arg - 1;
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.inputChannel == desiredChannel) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
-    cfg.val.inputChannel = arg - 1;
+    cfg.raw = current->raw;
+    cfg.val.inputChannel = desiredChannel;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
 }
@@ -321,8 +368,11 @@ static void pwmModeCallback(struct luaPropertiesCommon *item, uint8_t arg)
                   (item == &luaPwmMode1.common) ? 1 :
                   (item == &luaPwmMode2.common) ? 2 : 3;
 
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.mode == arg) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.raw = current->raw;
     cfg.val.mode = arg;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
@@ -334,8 +384,11 @@ static void pwmInvertCallback(struct luaPropertiesCommon *item, uint8_t arg)
                   (item == &luaPwmInvert1.common) ? 1 :
                   (item == &luaPwmInvert2.common) ? 2 : 3;
 
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.inverted == arg) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.raw = current->raw;
     cfg.val.inverted = arg;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
@@ -347,8 +400,11 @@ static void pwmNarrowCallback(struct luaPropertiesCommon *item, uint8_t arg)
                   (item == &luaPwmNarrow1.common) ? 1 :
                   (item == &luaPwmNarrow2.common) ? 2 : 3;
 
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.narrow == arg) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.raw = current->raw;
     cfg.val.narrow = arg;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
@@ -360,8 +416,11 @@ static void pwmFailsafeModeCallback(struct luaPropertiesCommon *item, uint8_t ar
                   (item == &luaPwmFailsafeMode1.common) ? 1 :
                   (item == &luaPwmFailsafeMode2.common) ? 2 : 3;
 
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.failsafeMode == arg) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.raw = current->raw;
     cfg.val.failsafeMode = arg;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
@@ -373,11 +432,19 @@ static void pwmFailsafeValCallback(struct luaPropertiesCommon *item, uint8_t arg
                   (item == &luaPwmFailsafeVal1.common) ? 1 :
                   (item == &luaPwmFailsafeVal2.common) ? 2 : 3;
 
-    if (arg < 988 || arg > 2100) return;
+    if (arg < PWM_FAILSAFE_OFFSET_US || arg > 2200) return;
+
+    uint16_t desiredFs = arg - PWM_FAILSAFE_OFFSET_US;
+    if (desiredFs > 0x7FF)
+    {
+        desiredFs = 0x7FF;
+    }
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.failsafe == desiredFs) return;
 
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
-    cfg.val.failsafe = arg - 988;  // Stored as offset from 988us
+    cfg.raw = current->raw;
+    cfg.val.failsafe = desiredFs;  // Stored as offset from 800us
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
 }
@@ -388,8 +455,11 @@ static void pwmMapModeCallback(struct luaPropertiesCommon *item, uint8_t arg)
                   (item == &luaPwmMapMode1.common) ? 1 :
                   (item == &luaPwmMapMode2.common) ? 2 : 3;
 
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.mapMode == arg) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.raw = current->raw;
     cfg.val.mapMode = arg;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
@@ -402,8 +472,11 @@ static void pwmRequiresArmCallback(struct luaPropertiesCommon *item, uint8_t arg
                   (item == &luaPwmRequiresArm1.common) ? 1 :
                   (item == &luaPwmRequiresArm2.common) ? 2 : 3;
 
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    if (current->val.requiresArm == arg) return;
+
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    cfg.raw = current->raw;
     cfg.val.requiresArm = arg;
     config.SetPwmChannelRaw(pin, cfg.raw.raw);
     devicesTriggerEvent();
@@ -477,9 +550,16 @@ static void pwmMapValuesCallback(struct luaPropertiesCommon *item, uint8_t arg)
 
     // Get current config and try to parse the hex string
     rx_config_pwm_t cfg;
-    cfg.raw = config.GetPwmChannel(pin)->raw;
+    const rx_config_pwm_t *current = config.GetPwmChannel(pin);
+    cfg.raw = current->raw;
+    uint32_t orig1 = cfg.raw.raw[1];
+    uint32_t orig2 = cfg.raw.raw[2];
 
     if (parseMapValues(hexStr, &cfg)) {
+        if (cfg.raw.raw[1] == orig1 && cfg.raw.raw[2] == orig2) {
+            DBGLN("Map values unchanged, skipping update");
+            return;
+        }
         // Valid hex string - update the config
         DBGLN("Parsed OK, writing raw[0]=0x%08X, raw[1]=0x%08X, raw[2]=0x%08X",
               cfg.raw.raw[0], cfg.raw.raw[1], cfg.raw.raw[2]);
@@ -488,6 +568,101 @@ static void pwmMapValuesCallback(struct luaPropertiesCommon *item, uint8_t arg)
     } else {
         DBGLN("parseMapValues FAILED for '%s'", hexStr);
     }
+}
+
+static int16_t crsfToPercent(uint16_t crsf)
+{
+    if (crsf == 0)
+    {
+        return INT16_MIN;
+    }
+    int32_t span = (int32_t)CRSF_CHANNEL_VALUE_MAX - (int32_t)CRSF_CHANNEL_VALUE_MIN;
+    int32_t value = (int32_t)crsf - (int32_t)CRSF_CHANNEL_VALUE_MIN;
+    return (int16_t)((value * 200) / span - 100);
+}
+
+static uint16_t percentToCrsf(int16_t percent)
+{
+    percent = constrain(percent, (int16_t)-100, (int16_t)100);
+    int32_t span = (int32_t)CRSF_CHANNEL_VALUE_MAX - (int32_t)CRSF_CHANNEL_VALUE_MIN;
+    int32_t value = (int32_t)(percent + 100) * span / 200;
+    return (uint16_t)(CRSF_CHANNEL_VALUE_MIN + value);
+}
+
+static void formatInputValueString(uint8_t pin, const rx_config_pwm_t *cfg, char *buffer, size_t len)
+{
+    if (cfg->val.inputChannel >= CRSF_NUM_CHANNELS)
+    {
+        strlcpy(buffer, "n/a", len);
+        return;
+    }
+
+    uint16_t crsf = ChannelData[cfg->val.inputChannel];
+    int16_t percent = crsfToPercent(crsf);
+    if (percent == INT16_MIN)
+    {
+        strlcpy(buffer, "---", len);
+        return;
+    }
+
+    snprintf(buffer, len, "%d", percent);
+}
+
+static void formatOutputValueString(uint8_t pin, const rx_config_pwm_t *cfg, char *buffer, size_t len)
+{
+    uint16_t us = servoGetLastOutputUs(pin);
+    if (us == UINT16_MAX || us == 0)
+    {
+        strlcpy(buffer, "n/a", len);
+        return;
+    }
+
+    switch ((eServoOutputMode)cfg->val.mode)
+    {
+    case somOnOff:
+        snprintf(buffer, len, "%u", us > 1500 ? 1 : 0);
+        break;
+    case som10KHzDuty:
+    {
+        int duty = constrain((int)us, 1000, 2000) - 1000;
+        int percent = (duty * 100 + 500) / 1000;
+        snprintf(buffer, len, "%d%%", percent);
+        break;
+    }
+    default:
+        snprintf(buffer, len, "%u", us);
+        break;
+    }
+}
+
+static void pwmInputValueCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    UNUSED(arg);
+
+    uint8_t pin = (item == &luaPwmInputValue0.common) ? 0 :
+                  (item == &luaPwmInputValue1.common) ? 1 :
+                  (item == &luaPwmInputValue2.common) ? 2 : 3;
+
+    const rx_config_pwm_t *cfg = config.GetPwmChannel(pin);
+    if (cfg->val.inputChannel >= CRSF_NUM_CHANNELS)
+    {
+        return;
+    }
+
+    struct luaItem_string *stringItem = (struct luaItem_string *)item;
+    char *mutableValue = const_cast<char *>(stringItem->value);
+    char *endPtr = nullptr;
+    long value = strtol(mutableValue, &endPtr, 10);
+    if (endPtr == mutableValue || value < -100 || value > 100)
+    {
+        formatInputValueString(pin, cfg, mutableValue, PWM_INPUT_VALUE_STR_LEN);
+        return;
+    }
+
+    ChannelData[cfg->val.inputChannel] = percentToCrsf((int16_t)value);
+    formatInputValueString(pin, cfg, mutableValue, PWM_INPUT_VALUE_STR_LEN);
+    servoNewChannelsAvailable();
+    devicesTriggerEvent();
 }
 
 // Arm PWM callback - arms/disarms outputs that have requiresArm flag set
@@ -821,6 +996,95 @@ static void luaparamSetFailsafe(struct luaPropertiesCommon *item, uint8_t arg)
 
 #endif // GPIO_PIN_PWM_OUTPUTS
 
+static void formatUidString(const uint8_t *uidSource, char *out)
+{
+    static const char hexChars[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        out[i * 2] = hexChars[(uidSource[i] >> 4) & 0x0F];
+        out[(i * 2) + 1] = hexChars[uidSource[i] & 0x0F];
+    }
+    out[UID_LEN * 2] = '\0';
+}
+
+static bool hexCharToNibble(char c, uint8_t *nibble)
+{
+    if (c >= '0' && c <= '9')
+    {
+        *nibble = c - '0';
+        return true;
+    }
+    if (c >= 'A' && c <= 'F')
+    {
+        *nibble = c - 'A' + 10;
+        return true;
+    }
+    if (c >= 'a' && c <= 'f')
+    {
+        *nibble = c - 'a' + 10;
+        return true;
+    }
+    return false;
+}
+
+static bool parseUidString(const char *text, uint8_t *outUid)
+{
+    if (text == nullptr)
+    {
+        return false;
+    }
+
+    size_t len = strlen(text);
+    if (len != UID_LEN * 2)
+    {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        uint8_t hi, lo;
+        if (!hexCharToNibble(text[i * 2], &hi) || !hexCharToNibble(text[(i * 2) + 1], &lo))
+        {
+            return false;
+        }
+        outUid[i] = (hi << 4) | lo;
+    }
+
+    return true;
+}
+
+static void luaUidCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    (void)arg;
+    struct luaItem_string *stringItem = (struct luaItem_string *)item;
+    uint8_t newUid[UID_LEN] = {0};
+
+    if (!parseUidString(stringItem->value, newUid))
+    {
+        formatUidString(config.GetUID(), uidString);
+        return;
+    }
+
+    bool differs = false;
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        if (newUid[i] != UID[i])
+        {
+            differs = true;
+            break;
+        }
+    }
+
+    if (!differs)
+    {
+        return;
+    }
+
+    UpdateUID(newUid);
+    formatUidString(newUid, uidString);
+    devicesTriggerEvent();
+}
+
 #if defined(POWER_OUTPUT_VALUES)
 
 static void luaparamSetPower(struct luaPropertiesCommon* item, uint8_t arg)
@@ -915,6 +1179,8 @@ static void registerLuaParameters()
     // Register per-pin folders and all parameters for each pin
     registerLUAParameter(&luaPinFolder0, nullptr, luaMappingFolder.common.id);
     registerLUAParameter(&luaPwmInputCh0, &pwmInputChCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmInputValue0, &pwmInputValueCallback, luaPinFolder0.common.id);
+    registerLUAParameter(&luaPwmOutputValue0, nullptr, luaPinFolder0.common.id);
     registerLUAParameter(&luaPwmMode0, &pwmModeCallback, luaPinFolder0.common.id);
     registerLUAParameter(&luaPwmInvert0, &pwmInvertCallback, luaPinFolder0.common.id);
     registerLUAParameter(&luaPwmNarrow0, &pwmNarrowCallback, luaPinFolder0.common.id);
@@ -926,6 +1192,8 @@ static void registerLuaParameters()
 
     registerLUAParameter(&luaPinFolder1, nullptr, luaMappingFolder.common.id);
     registerLUAParameter(&luaPwmInputCh1, &pwmInputChCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmInputValue1, &pwmInputValueCallback, luaPinFolder1.common.id);
+    registerLUAParameter(&luaPwmOutputValue1, nullptr, luaPinFolder1.common.id);
     registerLUAParameter(&luaPwmMode1, &pwmModeCallback, luaPinFolder1.common.id);
     registerLUAParameter(&luaPwmInvert1, &pwmInvertCallback, luaPinFolder1.common.id);
     registerLUAParameter(&luaPwmNarrow1, &pwmNarrowCallback, luaPinFolder1.common.id);
@@ -937,6 +1205,8 @@ static void registerLuaParameters()
 
     registerLUAParameter(&luaPinFolder2, nullptr, luaMappingFolder.common.id);
     registerLUAParameter(&luaPwmInputCh2, &pwmInputChCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmInputValue2, &pwmInputValueCallback, luaPinFolder2.common.id);
+    registerLUAParameter(&luaPwmOutputValue2, nullptr, luaPinFolder2.common.id);
     registerLUAParameter(&luaPwmMode2, &pwmModeCallback, luaPinFolder2.common.id);
     registerLUAParameter(&luaPwmInvert2, &pwmInvertCallback, luaPinFolder2.common.id);
     registerLUAParameter(&luaPwmNarrow2, &pwmNarrowCallback, luaPinFolder2.common.id);
@@ -948,6 +1218,8 @@ static void registerLuaParameters()
 
     registerLUAParameter(&luaPinFolder3, nullptr, luaMappingFolder.common.id);
     registerLUAParameter(&luaPwmInputCh3, &pwmInputChCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmInputValue3, &pwmInputValueCallback, luaPinFolder3.common.id);
+    registerLUAParameter(&luaPwmOutputValue3, nullptr, luaPinFolder3.common.id);
     registerLUAParameter(&luaPwmMode3, &pwmModeCallback, luaPinFolder3.common.id);
     registerLUAParameter(&luaPwmInvert3, &pwmInvertCallback, luaPinFolder3.common.id);
     registerLUAParameter(&luaPwmNarrow3, &pwmNarrowCallback, luaPinFolder3.common.id);
@@ -1000,6 +1272,7 @@ static void registerLuaParameters()
     sendLuaCommandResponse(&luaUnbindMode, newStep, msg);
   });
 
+  registerLUAParameter(&luaUid, &luaUidCallback);
   registerLUAParameter(&luaModelNumber);
   registerLUAParameter(&luaVersion);
   registerLUAParameter(&luaCommitHash);
@@ -1009,13 +1282,13 @@ static void registerLuaParameters()
 static void updateBindModeLabel()
 {
   // Always show "Enter Bind Mode"
-  luaBindMode.common.name = "Enter Bind Mode";
+  luaBindMode.common.name = "Bind";
 }
 
 static void updateUnbindModeLabel()
 {
   // Always show "Enter Unbind Mode"
-  luaUnbindMode.common.name = "Enter Unbind Mode";
+  luaUnbindMode.common.name = "Unbind";
 }
 
 static int event()
@@ -1064,10 +1337,14 @@ static int event()
     setLuaTextSelectionValue(&luaPwmInvert0, cfg0->val.inverted);
     setLuaTextSelectionValue(&luaPwmNarrow0, cfg0->val.narrow);
     setLuaTextSelectionValue(&luaPwmFailsafeMode0, cfg0->val.failsafeMode);
-    setLuaUint16Value(&luaPwmFailsafeVal0, cfg0->val.failsafe + 988);
+    setLuaUint16Value(&luaPwmFailsafeVal0, cfg0->val.failsafe + PWM_FAILSAFE_OFFSET_US);
     setLuaTextSelectionValue(&luaPwmMapMode0, cfg0->val.mapMode);
     formatMapValues(cfg0, luaPwmMapValuesStr0);
     setLuaTextSelectionValue(&luaPwmRequiresArm0, cfg0->val.requiresArm);
+    formatInputValueString(0, cfg0, luaPwmInputValueStr0, sizeof(luaPwmInputValueStr0));
+    setLuaStringValue(&luaPwmInputValue0, luaPwmInputValueStr0);
+    formatOutputValueString(0, cfg0, luaPwmOutputValueStr0, sizeof(luaPwmOutputValueStr0));
+    setLuaStringValue(&luaPwmOutputValue0, luaPwmOutputValueStr0);
 
     const rx_config_pwm_t *cfg1 = config.GetPwmChannel(1);
     setLuaUint8Value(&luaPwmInputCh1, cfg1->val.inputChannel + 1);
@@ -1075,10 +1352,14 @@ static int event()
     setLuaTextSelectionValue(&luaPwmInvert1, cfg1->val.inverted);
     setLuaTextSelectionValue(&luaPwmNarrow1, cfg1->val.narrow);
     setLuaTextSelectionValue(&luaPwmFailsafeMode1, cfg1->val.failsafeMode);
-    setLuaUint16Value(&luaPwmFailsafeVal1, cfg1->val.failsafe + 988);
+    setLuaUint16Value(&luaPwmFailsafeVal1, cfg1->val.failsafe + PWM_FAILSAFE_OFFSET_US);
     setLuaTextSelectionValue(&luaPwmMapMode1, cfg1->val.mapMode);
     formatMapValues(cfg1, luaPwmMapValuesStr1);
     setLuaTextSelectionValue(&luaPwmRequiresArm1, cfg1->val.requiresArm);
+    formatInputValueString(1, cfg1, luaPwmInputValueStr1, sizeof(luaPwmInputValueStr1));
+    setLuaStringValue(&luaPwmInputValue1, luaPwmInputValueStr1);
+    formatOutputValueString(1, cfg1, luaPwmOutputValueStr1, sizeof(luaPwmOutputValueStr1));
+    setLuaStringValue(&luaPwmOutputValue1, luaPwmOutputValueStr1);
 
     const rx_config_pwm_t *cfg2 = config.GetPwmChannel(2);
     setLuaUint8Value(&luaPwmInputCh2, cfg2->val.inputChannel + 1);
@@ -1086,10 +1367,14 @@ static int event()
     setLuaTextSelectionValue(&luaPwmInvert2, cfg2->val.inverted);
     setLuaTextSelectionValue(&luaPwmNarrow2, cfg2->val.narrow);
     setLuaTextSelectionValue(&luaPwmFailsafeMode2, cfg2->val.failsafeMode);
-    setLuaUint16Value(&luaPwmFailsafeVal2, cfg2->val.failsafe + 988);
+    setLuaUint16Value(&luaPwmFailsafeVal2, cfg2->val.failsafe + PWM_FAILSAFE_OFFSET_US);
     setLuaTextSelectionValue(&luaPwmMapMode2, cfg2->val.mapMode);
     formatMapValues(cfg2, luaPwmMapValuesStr2);
     setLuaTextSelectionValue(&luaPwmRequiresArm2, cfg2->val.requiresArm);
+    formatInputValueString(2, cfg2, luaPwmInputValueStr2, sizeof(luaPwmInputValueStr2));
+    setLuaStringValue(&luaPwmInputValue2, luaPwmInputValueStr2);
+    formatOutputValueString(2, cfg2, luaPwmOutputValueStr2, sizeof(luaPwmOutputValueStr2));
+    setLuaStringValue(&luaPwmOutputValue2, luaPwmOutputValueStr2);
 
     const rx_config_pwm_t *cfg3 = config.GetPwmChannel(3);
     setLuaUint8Value(&luaPwmInputCh3, cfg3->val.inputChannel + 1);
@@ -1097,13 +1382,19 @@ static int event()
     setLuaTextSelectionValue(&luaPwmInvert3, cfg3->val.inverted);
     setLuaTextSelectionValue(&luaPwmNarrow3, cfg3->val.narrow);
     setLuaTextSelectionValue(&luaPwmFailsafeMode3, cfg3->val.failsafeMode);
-    setLuaUint16Value(&luaPwmFailsafeVal3, cfg3->val.failsafe + 988);
+    setLuaUint16Value(&luaPwmFailsafeVal3, cfg3->val.failsafe + PWM_FAILSAFE_OFFSET_US);
     setLuaTextSelectionValue(&luaPwmMapMode3, cfg3->val.mapMode);
     formatMapValues(cfg3, luaPwmMapValuesStr3);
     setLuaTextSelectionValue(&luaPwmRequiresArm3, cfg3->val.requiresArm);
+    formatInputValueString(3, cfg3, luaPwmInputValueStr3, sizeof(luaPwmInputValueStr3));
+    setLuaStringValue(&luaPwmInputValue3, luaPwmInputValueStr3);
+    formatOutputValueString(3, cfg3, luaPwmOutputValueStr3, sizeof(luaPwmOutputValueStr3));
+    setLuaStringValue(&luaPwmOutputValue3, luaPwmOutputValueStr3);
+
   }
 #endif
 
+  formatUidString(config.GetUID(), uidString);
   if (config.GetModelId() == 255)
   {
     setLuaStringValue(&luaModelNumber, "Off");
@@ -1116,6 +1407,8 @@ static int event()
   setLuaTextSelectionValue(&luaBindStorage, config.GetBindStorage());
   updateBindModeLabel();
   updateUnbindModeLabel();
+
+  LUA_FIELD_HIDE(luaSerialProtocol);
 
   if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
   {
@@ -1139,8 +1432,18 @@ static int timeout()
   luaHandleUpdateParameter();
   // Receivers can only `UpdateParamReq == true` every 4th packet due to the transmitter cadence in 1:2
   // Channels, Downlink Telemetry Slot, Uplink Telemetry (the write command), Downlink Telemetry Slot...
-  // (interval * 4 / 1000) or 1 second if not connected
-  return (connectionState == connected) ? ExpressLRS_currAirRate_Modparams->interval / 250 : 1000;
+  // (interval * 4 / 1000) when connected. When disconnected (or RF settings not initialised yet)
+  // we still want responsive serial params, so poll at ~10 ms instead of waiting a full second.
+  if (connectionState == connected && ExpressLRS_currAirRate_Modparams != nullptr)
+  {
+    uint16_t connectedDelay = ExpressLRS_currAirRate_Modparams->interval / 250;
+    if (connectedDelay == 0)
+    {
+      connectedDelay = 1;
+    }
+    return connectedDelay;
+  }
+  return 10;
 }
 
 static int start()

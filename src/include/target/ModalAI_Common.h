@@ -94,7 +94,7 @@ https://github.com/jaxxzer
 
 #define NO_TEAMRACE
 
-#define DEV
+// #define DEV
 #if defined(DEV)
 #define DEBUG_LOG
 #define DEBUG_RTT

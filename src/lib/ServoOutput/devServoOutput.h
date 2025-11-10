@@ -20,10 +20,13 @@ extern bool overridePWM;
 extern pwm_val_override_t pwmOverride;
 extern bool pwmIsArmed;
 
+uint16_t servoGetLastOutputUs(uint8_t ch);
+
 // Notify this unit that new channel data has arrived
 void servoNewChannelsAvailable();
 // Re-initialize PWM outputs (called when configuration changes)
 void reinitializePWM();
 #else
 inline void servoNewChannelsAvailable(){};
+inline uint16_t servoGetLastOutputUs(uint8_t) { return 0; }
 #endif

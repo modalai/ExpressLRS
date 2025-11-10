@@ -126,9 +126,11 @@ uint16_t servoOutputModeToFrequency(eServoOutputMode mode)
 static void servoWrite(uint8_t ch, uint16_t us)
 {
     const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
+    bool valueChanged = pwmChannelValues[ch] != us;
 #if defined(PLATFORM_ESP32)
     if ((eServoOutputMode)chConfig->val.mode == somDShot)
     {
+        pwmChannelValues[ch] = us;
         // DBGLN("Writing DShot output: us: %u, ch: %d", us, ch);
         if (dshotInstances[ch])
         {
@@ -137,7 +139,7 @@ static void servoWrite(uint8_t ch, uint16_t us)
     }
     else
 #endif
-    if (servoPins[ch] != UNDEF_PIN && pwmChannelValues[ch] != us)
+    if (servoPins[ch] != UNDEF_PIN && valueChanged)
     {
         pwmChannelValues[ch] = us;
         if ((eServoOutputMode)chConfig->val.mode == somOnOff)
@@ -154,6 +156,15 @@ static void servoWrite(uint8_t ch, uint16_t us)
             PWM.setMicroseconds(pwmChannels[ch], us / (chConfig->val.narrow + 1));
         }
     }
+}
+
+uint16_t servoGetLastOutputUs(uint8_t ch)
+{
+    if (ch >= GPIO_PIN_PWM_OUTPUTS_COUNT)
+    {
+        return UINT16_MAX;
+    }
+    return pwmChannelValues[ch];
 }
 
 static void servosFailsafe()
