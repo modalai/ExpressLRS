@@ -515,7 +515,7 @@ static bool parseMapValues(const char *hexStr, rx_config_pwm_t *cfg)
     }
 
     // Parse hex string to 64-bit value
-    uint64_t packed = 0;
+    volatile uint64_t packed = 0;
     for (int i = 0; i < 16; i++) {
         char c = hexStr[i];
         uint8_t nibble;
@@ -526,11 +526,22 @@ static bool parseMapValues(const char *hexStr, rx_config_pwm_t *cfg)
         packed = (packed << 4) | nibble;
     }
 
-    // Write the 64-bit value directly to the raw array
-    // raw[1] = first 32 bits of the map values (bits 32-63 of the structure)
-    // raw[2] = second 32 bits of the map values (bits 64-95 of the structure)
-    cfg->raw.raw[1] = (uint32_t)(packed & 0xFFFFFFFF);
-    cfg->raw.raw[2] = (uint32_t)(packed >> 32);
+    // Decode packed structure as per encode_pwm_map_values()
+    uint16_t in1 = (uint16_t)((packed >> 0) & 0x3FFULL);
+    uint16_t in2 = (uint16_t)((packed >> 10) & 0x3FFULL);
+    uint16_t in3 = (uint16_t)((packed >> 20) & 0x3FFULL);
+    uint16_t out1 = (uint16_t)((packed >> 30) & 0x7FFULL);
+    uint16_t out2 = (uint16_t)((packed >> 41) & 0x7FFULL);
+    uint16_t out3 = (uint16_t)((packed >> 52) & 0x7FFULL);
+    uint8_t extra = (uint8_t)((packed >> 63) & 0x1U);
+
+    cfg->val.mapInVal1 = in1;
+    cfg->val.mapInVal2 = in2;
+    cfg->val.mapInVal3 = in3;
+    cfg->val.mapOutVal1 = out1;
+    cfg->val.mapOutVal2 = out2;
+    cfg->val.mapOutVal3 = out3;
+    cfg->val.extra = extra;
 
     return true;
 }
@@ -1153,11 +1164,6 @@ static void registerLuaParameters()
     });
   }
 
-#if defined(POWER_OUTPUT_VALUES)
-  luadevGeneratePowerOpts(&luaTlmPower);
-  registerLUAParameter(&luaTlmPower, &luaparamSetPower);
-#endif
-
   // Teamrace
   registerLUAParameter(&luaTeamraceFolder);
   registerLUAParameter(&luaTeamraceChannel, [](struct luaPropertiesCommon* item, uint8_t arg) {
@@ -1271,6 +1277,11 @@ static void registerLuaParameters()
 
     sendLuaCommandResponse(&luaUnbindMode, newStep, msg);
   });
+
+#if defined(POWER_OUTPUT_VALUES)
+  luadevGeneratePowerOpts(&luaTlmPower);
+  registerLUAParameter(&luaTlmPower, &luaparamSetPower);
+#endif
 
   registerLUAParameter(&luaUid, &luaUidCallback);
   registerLUAParameter(&luaModelNumber);
