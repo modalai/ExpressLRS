@@ -485,13 +485,15 @@ static void pwmRequiresArmCallback(struct luaPropertiesCommon *item, uint8_t arg
 // Format map values as hex string (64 bits from raw[1] and raw[2])
 static void formatMapValues(const rx_config_pwm_t *cfg, char *out)
 {
-    // Read the 64-bit map values directly from the raw array
-    // raw[0] = first 32 bits (failsafe, inputChannel, etc.)
-    // raw[1] = bits 32-63 of the structure (first half of the 64-bit map values)
-    // raw[2] = bits 64-95 of the structure (second half of the 64-bit map values)
-    uint64_t packed = ((uint64_t)cfg->raw.raw[2] << 32) | cfg->raw.raw[1];
+    uint64_t packed = 0;
+    packed |= ((uint64_t)(cfg->val.mapInVal1 & 0x3FFU)) << 0;
+    packed |= ((uint64_t)(cfg->val.mapInVal2 & 0x3FFU)) << 10;
+    packed |= ((uint64_t)(cfg->val.mapInVal3 & 0x3FFU)) << 20;
+    packed |= ((uint64_t)(cfg->val.mapOutVal1 & 0x7FFU)) << 30;
+    packed |= ((uint64_t)(cfg->val.mapOutVal2 & 0x7FFU)) << 41;
+    packed |= ((uint64_t)(cfg->val.mapOutVal3 & 0x7FFU)) << 52;
+    packed |= ((uint64_t)(cfg->val.extra & 0x1U)) << 63;
 
-    // Format as 16-character hex string
     static const char hexChars[] = "0123456789ABCDEF";
     for (int i = 15; i >= 0; i--) {
         out[i] = hexChars[packed & 0xF];
@@ -567,10 +569,10 @@ static void pwmMapValuesCallback(struct luaPropertiesCommon *item, uint8_t arg)
     uint32_t orig2 = cfg.raw.raw[2];
 
     if (parseMapValues(hexStr, &cfg)) {
-        if (cfg.raw.raw[1] == orig1 && cfg.raw.raw[2] == orig2) {
-            DBGLN("Map values unchanged, skipping update");
-            return;
-        }
+        // if (cfg.raw.raw[1] == orig1 && cfg.raw.raw[2] == orig2) {
+        //     DBGLN("Map values unchanged, skipping update");
+        //     return;
+        // }
         // Valid hex string - update the config
         DBGLN("Parsed OK, writing raw[0]=0x%08X, raw[1]=0x%08X, raw[2]=0x%08X",
               cfg.raw.raw[0], cfg.raw.raw[1], cfg.raw.raw[2]);
