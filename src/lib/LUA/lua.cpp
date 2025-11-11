@@ -514,6 +514,22 @@ bool luaHandleUpdateParameter()
         uint8_t id = parameterIndex;
         uint8_t arg = parameterArg;
         struct luaPropertiesCommon *p = paramDefinitions[id];
+        const uint8_t *chunkData = nullptr;
+        uint8_t chunkDataLen = 0;
+
+        if (parameterData != nullptr)
+        {
+          uint8_t frameSize = parameterData[CRSF_TELEMETRY_LENGTH_INDEX];
+          if (frameSize > CRSF_FRAME_LENGTH_EXT_TYPE_CRC)
+          {
+            uint8_t chunkSize = frameSize - CRSF_FRAME_LENGTH_EXT_TYPE_CRC;
+            if (chunkSize > 2)
+            {
+              chunkDataLen = chunkSize - 2;
+              chunkData = &parameterData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1];
+            }
+          }
+        }
 
         // Handle STRING parameter writes specially
         uint8_t dataType = p->type & CRSF_FIELD_TYPE_MASK;
@@ -522,7 +538,7 @@ bool luaHandleUpdateParameter()
           // CRSF_TELEMETRY_FIELD_CHUNK_INDEX points to the arg byte
           // String data starts at the NEXT byte (index + 1)
           struct luaItem_string *stringParam = (struct luaItem_string *)p;
-          const char *newValue = (const char *)&parameterData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1];
+          const char *newValue = (const char *)(chunkData ? chunkData : (parameterData + CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1));
           DBGLN("Set Lua STRING [%s]='%s' (len=%u)", p->name, newValue, strlen(newValue));
 
           // Update the string value in the parameter structure
@@ -537,6 +553,17 @@ bool luaHandleUpdateParameter()
             paramCallbacks[id](p, 0);  // arg is not used for STRING types
           }
         } else {
+          if ((dataType == CRSF_UINT16 || dataType == CRSF_INT16) && chunkData != nullptr && chunkDataLen >= 2)
+          {
+            struct luaItem_int16 *intParam = (struct luaItem_int16 *)p;
+            uint16_t beVal = ((uint16_t)chunkData[0] << 8) | chunkData[1];
+            intParam->properties.u.value = beVal;
+            // Optional: update min/max if included
+            if (chunkDataLen >= sizeof(intParam->properties))
+            {
+              memcpy(&intParam->properties, chunkData, sizeof(intParam->properties));
+            }
+          }
           // Handle numeric parameter writes
           DBGLN("Set Lua [%s]=%u", p->name, arg);
           if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {

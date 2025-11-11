@@ -432,9 +432,20 @@ static void pwmFailsafeValCallback(struct luaPropertiesCommon *item, uint8_t arg
                   (item == &luaPwmFailsafeVal1.common) ? 1 :
                   (item == &luaPwmFailsafeVal2.common) ? 2 : 3;
 
-    if (arg < PWM_FAILSAFE_OFFSET_US || arg > 2200) return;
+    struct luaItem_int16 *intItem = (struct luaItem_int16 *)item;
+    uint16_t value = intItem->properties.u.value;
+    // uint16_t value = be16toh(valueBe);
 
-    uint16_t desiredFs = arg - PWM_FAILSAFE_OFFSET_US;
+    if (value < PWM_FAILSAFE_OFFSET_US)
+    {
+        value = PWM_FAILSAFE_OFFSET_US;
+    }
+    else if (value > 2200)
+    {
+        value = 2200;
+    }
+
+    uint16_t desiredFs = value - PWM_FAILSAFE_OFFSET_US;
     if (desiredFs > 0x7FF)
     {
         desiredFs = 0x7FF;
