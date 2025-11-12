@@ -278,7 +278,7 @@ static void TIM1_Init(void)
   TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
 
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 72;        // 72MHz APB2 CLK -> 1MHz APB2 CLK
+  htim1.Init.Prescaler = 71;        // 72MHz APB2 CLK -> 1MHz APB2 CLK
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 20000;         // 2100 us at 1 MHz
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -350,7 +350,7 @@ static void TIM3_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 72;
+  htim3.Init.Prescaler = 71;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 20000;         // 2100 us at 1 MHz
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
