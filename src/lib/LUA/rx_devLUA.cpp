@@ -171,7 +171,7 @@ static const char STR_PIN_4[] = "Pin 4";
 // Shared option strings
 static const char STR_PWM_MODES[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHz Duty;On/Off";
 static const char STR_ON_OFF[] = "Off;On";
-static const char STR_FAILSAFE_MODES[] = "No Pulses;Last Pos;Custom";
+static const char STR_FAILSAFE_MODES[] = "Custom;No Pulses;Last Pos";
 static const char STR_MAP_MODES[] = "Off;Interpolate;Step";
 
 // Main folder
