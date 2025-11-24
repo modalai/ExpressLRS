@@ -1,0 +1,13 @@
+{
+  "name": "RTT",
+  "version": "1.0.0",
+  "description": "SEGGER RTT library for ARM targets",
+  "platforms": "ststm32",
+  "build": {
+    "srcFilter": [
+      "+<*>",
+      "-<*.S>"
+    ],
+    "flags": "-DPLATFORM_STM32"
+  }
+}
