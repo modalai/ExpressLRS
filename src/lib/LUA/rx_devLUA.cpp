@@ -172,7 +172,7 @@ static const char STR_PIN_4[] = "Pin 4";
 static const char STR_PWM_MODES[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHz Duty;On/Off";
 static const char STR_ON_OFF[] = "Off;On";
 static const char STR_FAILSAFE_MODES[] = "Custom;No Pulses;Last Pos";
-static const char STR_MAP_MODES[] = "Off;Interpolate;Step";
+static const char STR_MAP_MODES[] = "Off;Step;Interpolate";
 
 // Main folder
 static struct luaItem_folder luaMappingFolder = {
