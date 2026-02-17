@@ -92,7 +92,8 @@ https://github.com/jaxxzer
 #define SYSCLK_FREQ_72MHz
 // #define GPIO_PIN_ANT_CTRL PB10 // Unused pin
 
-#define NO_TEAMRACE
+// Team race setting now persists across power cycles.
+// Use "voxl-elrs configure" to reset it to disabled.
 
 // #define DEV
 #if defined(DEV)
