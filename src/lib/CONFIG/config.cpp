@@ -741,6 +741,15 @@ void RxConfig::Load()
         return;
     }
 
+    // V11→V12: teamrace fields moved before pwmChannels to fit within 128-byte EEPROM.
+    // Preserve uid and other header fields, reset everything else to defaults.
+    if (version == 11)
+    {
+        UpgradeEepromV11();
+        CheckUpdateFlashedUid(false);
+        return;
+    }
+
     // Can't upgrade from version <4, or when flashing a previous version, just use defaults.
     if (version < 4 || version > RX_CONFIG_VERSION)
     {
@@ -942,6 +951,25 @@ void RxConfig::UpgradeEepromV9()
     SetDefaults(true);
 }
 
+void RxConfig::UpgradeEepromV11()
+{
+    // V11→V12: teamrace/targetSysId/sourceSysId moved before pwmChannels so they
+    // land within the first 128 bytes of EEPROM (physical chip capacity on M0184).
+    // The V11 struct had these fields at offset 216 which is beyond the physical chip,
+    // so they were never actually stored.  Preserve uid and other header fields
+    // (offsets 0-23 are identical in V11 and V12) then reset everything else.
+    uint8_t savedUid[UID_LEN];
+    memcpy(savedUid, m_config.uid, UID_LEN);
+    uint32_t savedFlashDiscriminator = m_config.flash_discriminator;
+
+    SetDefaults(false);
+
+    memcpy(m_config.uid, savedUid, UID_LEN);
+    m_config.flash_discriminator = savedFlashDiscriminator;
+    m_modified = true;
+    Commit();
+}
+
 bool RxConfig::GetIsBound() const
 {
     if (m_config.bindStorage == BINDSTORAGE_VOLATILE)
@@ -999,6 +1027,7 @@ RxConfig::Commit()
     // Write the struct to eeprom
     m_eeprom->Put(0, m_config);
     m_eeprom->Commit();
+
 
     m_modified = false;
 }

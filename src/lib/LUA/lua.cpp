@@ -489,7 +489,7 @@ void registerLUAParameter(void *definition, luaCallback callback, uint8_t parent
 
 bool luaHandleUpdateParameter()
 {
-  DBGVLN("luaHandleUpdateParameter() called, UpdateParamReq=%d", UpdateParamReq);
+  // DBGVLN("luaHandleUpdateParameter() called, UpdateParamReq=%d", UpdateParamReq);
   if (UpdateParamReq == false)
   {
     return false;

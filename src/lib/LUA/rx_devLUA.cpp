@@ -1452,7 +1452,7 @@ static int event()
 
 static int timeout()
 {
-  DBGVLN("LUA_device timeout() called");
+//   DBGVLN("LUA_device timeout() called");
   luaHandleUpdateParameter();
   // Receivers can only `UpdateParamReq == true` every 4th packet due to the transmitter cadence in 1:2
   // Channels, Downlink Telemetry Slot, Uplink Telemetry (the write command), Downlink Telemetry Slot...

@@ -16,7 +16,7 @@
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
 #define TX_CONFIG_VERSION   7U
-#define RX_CONFIG_VERSION   11U
+#define RX_CONFIG_VERSION   12U
 
 #if defined(TARGET_TX)
 
@@ -270,12 +270,15 @@ typedef struct __attribute__((packed)) {
     uint8_t     serialProtocol:4,
                 failsafeMode:2,
                 unused:2;
-    rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
+    // NOTE: teamrace and sysid fields must remain before pwmChannels so they land
+    // within the first 128 bytes of EEPROM (the physical chip capacity on M0184).
     uint8_t     teamraceChannel:4,
                 teamracePosition:3,
                 teamracePitMode:1;  // FUTURE: Enable pit mode when disabling model
     uint8_t     targetSysId;
     uint8_t     sourceSysId;
+    uint8_t     reserved1;          // padding to keep pwmChannels 4-byte aligned
+    rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
 } rx_config_t;
 
 class RxConfig
@@ -349,6 +352,7 @@ private:
     void UpgradeEepromV6();
     void UpgradeEepromV7V8();
     void UpgradeEepromV9();
+    void UpgradeEepromV11();
 
     rx_config_t m_config;
     ELRS_EEPROM *m_eeprom;
