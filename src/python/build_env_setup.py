@@ -1,6 +1,7 @@
 Import("env", "projenv")
 import os
 import shutil
+import jlink
 import stlink
 import UARTupload
 import opentx
@@ -61,6 +62,10 @@ if stm and "$UPLOADER $UPLOADERFLAGS" in env.get('UPLOADCMD', '$UPLOADER $UPLOAD
         env.Replace(UPLOADER="dfu-util", UPLOADERFLAGS=["-d", "0483:df11",
             "-s", "%s:leave" % board.get("upload.offset_address", "0x08001000"),
             "-D"], UPLOADCMD='$UPLOADER $UPLOADERFLAGS "${SOURCE.get_abspath()}"')
+
+    # Use J-Link for JLINK targets
+    elif "_JLINK" in target_name:
+        env.Replace(UPLOADCMD=jlink.on_upload)
 
     # Default to ST-Link uploading
     # Note: this target is also used to build 'firmware.elrs' binary
