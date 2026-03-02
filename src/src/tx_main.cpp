@@ -893,7 +893,7 @@ void UpdateConnectDisconnectStatus()
     (now - rfModeLastChangedMS) > ExpressLRS_currAirRate_RFperfParams->DisconnectTimeoutMs)
   {
     connectionState = disconnected;
-    DBGLN("Disconnected | %d | %d", now - lastTlmMillis, msConnectionLostTimeout);
+    // DBGLN("Disconnected | %d | %d", now - lastTlmMillis, msConnectionLostTimeout);
     connectionHasModelMatch = true;
     CRSFHandset::ForwardDevicePings = false;
   }
