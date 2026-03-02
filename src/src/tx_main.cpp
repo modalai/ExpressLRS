@@ -1031,10 +1031,6 @@ static void ExitBindingMode()
   SetRFLinkRate(config.GetRate()); //return to original rate
 
   DBGLN("Exiting binding mode");
-  // todo this is a hack to fix initial bind issue
-  #if defined(M0139)
-    reset_into_bootloader();
-  #endif
 }
 
 void EnterBindingModeSafely()
