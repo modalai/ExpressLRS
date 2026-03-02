@@ -16,7 +16,7 @@
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
 #define TX_CONFIG_VERSION   7U
-#define RX_CONFIG_VERSION   12U
+#define RX_CONFIG_VERSION   13U
 
 #if defined(TARGET_TX)
 
@@ -189,7 +189,11 @@ extern TxConfig config;
 ///////////////////////////////////////////////////
 
 #if defined(TARGET_RX)
+#ifdef GPIO_PIN_PWM_OUTPUTS_COUNT
+constexpr uint8_t PWM_MAX_CHANNELS = GPIO_PIN_PWM_OUTPUTS_COUNT;
+#else
 constexpr uint8_t PWM_MAX_CHANNELS = 16;
+#endif
 
 typedef enum : uint8_t {
     BINDSTORAGE_PERSISTENT = 0,
