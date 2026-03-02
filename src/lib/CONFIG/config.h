@@ -189,7 +189,7 @@ extern TxConfig config;
 ///////////////////////////////////////////////////
 
 #if defined(TARGET_RX)
-#ifdef GPIO_PIN_PWM_OUTPUTS_COUNT
+#if defined(GPIO_PIN_PWM_OUTPUTS_COUNT) && !defined(TARGET_UNIFIED_RX)
 constexpr uint8_t PWM_MAX_CHANNELS = GPIO_PIN_PWM_OUTPUTS_COUNT;
 #else
 constexpr uint8_t PWM_MAX_CHANNELS = 16;
