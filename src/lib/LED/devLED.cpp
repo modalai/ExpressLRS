@@ -171,6 +171,10 @@ static int event()
     #if defined(TARGET_RX)
         if (InBindingMode && GPIO_PIN_LED != UNDEF_PIN)
         {
+            if (GPIO_PIN_LED_GREEN != UNDEF_PIN)
+            {
+                digitalWrite(GPIO_PIN_LED_GREEN, LOW ^ GPIO_LED_GREEN_INVERTED);
+            }
             return flashLED(GPIO_PIN_LED, GPIO_LED_RED_INVERTED, LEDSEQ_BINDING, sizeof(LEDSEQ_BINDING));
         }
     #else
