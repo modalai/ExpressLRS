@@ -448,12 +448,11 @@ bool ICACHE_RAM_ATTR HandleFHSS()
     }
 
 #if defined(RADIO_SX127X)
-    // SX127x radio has to reset receive mode after hopping
-    uint8_t modresultTLM = (OtaNonce + 1) % ExpressLRS_currTlmDenom;
-    if (modresultTLM != 0 || ExpressLRS_currTlmDenom == 1) // if we are about to send a tlm response don't bother going back to rx
-    {
-        Radio.RXnb();
-    }
+    // SX127x radio has to reset receive mode after hopping.
+    // Always call RXnb after a hop. If TLM is going to be sent, TXnb will override
+    // this immediately. Skipping RXnb on TLM slots leaves the radio in standby when
+    // TLM is blocked (e.g. teamrace mismatch), causing missed packets and sync failure.
+    Radio.RXnb();
 #endif
 #if defined(Regulatory_Domain_EU_CE_2400)
     SetClearChannelAssessmentTime();
@@ -1197,7 +1196,7 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
     if (Radio.FrequencyErrorAvailable())
     {
     #if defined(RADIO_SX127X)
-        #if !defined(m0139)
+        #if !defined(M0139)
             // Adjusts FreqCorrection for RX freq offset
             int32_t tempFreqCorrection = HandleFreqCorr(Radio.GetFrequencyErrorbool());
             // Teamp900 also needs to adjust its demood PPM
