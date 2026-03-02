@@ -347,7 +347,8 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
 
   if ((ModParams == ExpressLRS_currAirRate_Modparams)
     && (RFperf == ExpressLRS_currAirRate_RFperfParams)
-    && (OtaSwitchModeCurrent == newSwitchMode))
+    && (OtaSwitchModeCurrent == newSwitchMode)
+    && (!InBindingMode))
     return;
 
   DBGLN("set rate %u", index);
