@@ -2193,6 +2193,13 @@ void setup()
         devicesRegister(ui_devices, ARRAY_SIZE(ui_devices));
         devicesInit();
 
+        // Send boot device info frame once, immediately after devices are initialized
+        uint8_t deviceInformation[DEVICE_INFORMATION_LENGTH];
+        CRSF::GetDeviceInformation(deviceInformation, getLuaParamCount());
+        CRSF::SetExtendedHeaderAndCrc(deviceInformation, CRSF_FRAMETYPE_DEVICE_INFO,
+            DEVICE_INFORMATION_FRAME_SIZE, CRSF_ADDRESS_CRSF_RECEIVER, CRSF_ADDRESS_FLIGHT_CONTROLLER);
+        serialIO->queueMSPFrameTransmission(deviceInformation);
+
         setupBindingFromConfig();
 
         FHSSrandomiseFHSSsequence(uidMacSeedGet());

@@ -81,7 +81,9 @@ void CRSF::GetDeviceInformation(uint8_t *frame, uint8_t fieldCount)
     device->softwareVer = htobe32(VersionStrToU32(version)); // seen [ 0x00, 0x00, 0x05, 0x0f ] // "Firmware: V 5.15"
 #endif
     device->fieldCnt = fieldCount;
-    device->parameterVersion = 0;
+    static bool isFirstDeviceInfo = true;
+    device->parameterVersion = isFirstDeviceInfo ? 0x80 : 0;
+    isFirstDeviceInfo = false;
 }
 
 void CRSF::SetMspV2Request(uint8_t *frame, uint16_t function, uint8_t *payload, uint8_t payloadLength)
