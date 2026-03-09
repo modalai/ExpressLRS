@@ -861,6 +861,10 @@ static void registerLuaParameters()
   registerLUAParameter(&luaELRSversion);
   registerLUAParameter(&luaTxUid);
   registerLUAParameter(NULL);
+#if defined(M0139)
+  LUA_FIELD_HIDE(luaWiFiFolder);
+  LUA_FIELD_HIDE(luaVtxFolder);
+#endif
 }
 
 static int event()
