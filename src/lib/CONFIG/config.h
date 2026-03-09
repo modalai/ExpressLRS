@@ -15,7 +15,7 @@
 #define TX_CONFIG_MAGIC     (0b01U << 30)
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
-#define TX_CONFIG_VERSION   7U
+#define TX_CONFIG_VERSION   8U
 #define RX_CONFIG_VERSION   13U
 
 #if defined(TARGET_TX)
@@ -87,6 +87,9 @@ typedef struct {
     uint8_t         vtxPower;   // 0=Do not set, else power number
     uint8_t         vtxPitmode; // Off/On/AUX1^/AUX1v/etc
     uint8_t         powerFanThreshold:4; // Power level to enable fan if present
+    // NOTE: uid must remain before model_config so it lands within the first 128 bytes
+    // of EEPROM (the physical chip capacity on M0184/M0193).
+    uint8_t         uid[UID_LEN];       // saved random UID (all-zero = use hardware-derived)
     model_config_t  model_config[CONFIG_TX_MODEL_CNT];
     uint8_t         fanMode;            // some value used by thermal?
     uint8_t         motionMode:2,       // bool, but space for 2 more modes
@@ -134,6 +137,7 @@ public:
     model_config_t const &GetModelConfig(uint8_t model) const { return m_config.model_config[model]; }
     uint8_t GetPTRStartChannel() const { return m_model->ptrStartChannel; }
     uint8_t GetPTREnableChannel() const { return m_model->ptrEnableChannel; }
+    const uint8_t* GetUID() const { return m_config.uid; }
 
     // Setters
     void SetRate(uint8_t rate);
@@ -162,6 +166,7 @@ public:
     void SetBackpackTlmMode(uint8_t mode);
     void SetPTRStartChannel(uint8_t ptrStartChannel);
     void SetPTREnableChannel(uint8_t ptrEnableChannel);
+    void SetUID(const uint8_t* uid);
 
     // State setters
     bool SetModelId(uint8_t modelId);
@@ -170,6 +175,7 @@ private:
 #if !defined(PLATFORM_ESP32)
     void UpgradeEepromV5ToV6();
     void UpgradeEepromV6ToV7();
+    void UpgradeEepromV7ToV8();
 #endif
 
     tx_config_t m_config;

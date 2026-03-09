@@ -14,7 +14,8 @@
 #define FAN_CHANGED         bit(4)
 #define MOTION_CHANGED      bit(5)
 #define BUTTON_CHANGED      bit(6)
-#define ALL_CHANGED         (MODEL_CHANGED | VTX_CHANGED | MAIN_CHANGED | FAN_CHANGED | MOTION_CHANGED | BUTTON_CHANGED)
+#define UID_CHANGED         bit(7)
+#define ALL_CHANGED         (MODEL_CHANGED | VTX_CHANGED | MAIN_CHANGED | FAN_CHANGED | MOTION_CHANGED | BUTTON_CHANGED | UID_CHANGED)
 
 // Really awful but safe(?) type punning of model_config_t/v6_model_config_t to and from uint32_t
 template<class T> static const void U32_to_Model(uint32_t const u32, T * const model)
@@ -183,6 +184,11 @@ void TxConfig::Load()
             m_config.backpackTlmMode = value8;
     }
 
+    if (version >= 8) {
+        size_t uid_len = UID_LEN;
+        nvs_get_blob(handle, "uid", m_config.uid, &uid_len);
+    }
+
     for(unsigned i=0; i<CONFIG_TX_MODEL_CNT; i++)
     {
         char model[10] = "model";
@@ -244,6 +250,12 @@ void TxConfig::Load()
     if (version == 6)
     {
         UpgradeEepromV6ToV7();
+        version = 7;
+    }
+
+    if (version == 7)
+    {
+        UpgradeEepromV7ToV8();
     }
 }
 
@@ -294,6 +306,15 @@ void TxConfig::UpgradeEepromV6ToV7()
 
     // Full Commit now
     m_config.version = 7U | TX_CONFIG_MAGIC;
+    Commit();
+}
+
+void TxConfig::UpgradeEepromV7ToV8()
+{
+    // Zero the uid field — setupBindingFromConfig() will use hardware-derived UID
+    memset(m_config.uid, 0, UID_LEN);
+    m_config.version = 8U | TX_CONFIG_MAGIC;
+    m_modified = ALL_CHANGED;
     Commit();
 }
 #endif
@@ -348,6 +369,10 @@ TxConfig::Commit()
     {
         nvs_set_u32(handle, "button1", m_config.buttonColors[0].raw);
         nvs_set_u32(handle, "button2", m_config.buttonColors[1].raw);
+    }
+    if (m_modified & UID_CHANGED)
+    {
+        nvs_set_blob(handle, "uid", m_config.uid, UID_LEN);
     }
     nvs_set_u32(handle, "tx_version", m_config.version);
     nvs_commit(handle);
@@ -609,6 +634,16 @@ TxConfig::SetPTREnableChannel(uint8_t ptrEnableChannel)
     if (ptrEnableChannel != m_model->ptrEnableChannel) {
         m_model->ptrEnableChannel = ptrEnableChannel;
         m_modified |= MODEL_CHANGED;
+    }
+}
+
+void
+TxConfig::SetUID(const uint8_t* uid)
+{
+    if (memcmp(m_config.uid, uid, UID_LEN) != 0)
+    {
+        memcpy(m_config.uid, uid, UID_LEN);
+        m_modified |= UID_CHANGED;
     }
 }
 

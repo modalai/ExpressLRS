@@ -146,6 +146,12 @@ static struct luaItem_command luaBind = {
     STR_EMPTYSPACE
 };
 
+static struct luaItem_command luaUnbind = {
+    {"Unbind", CRSF_COMMAND},
+    lcsIdle, // step
+    STR_EMPTYSPACE
+};
+
 static struct luaItem_string luaInfo = {
     {"Bad/Good", (crsf_value_type_e)(CRSF_INFO | CRSF_FIELD_ELRS_HIDDEN)},
     STR_EMPTYSPACE,
@@ -311,6 +317,7 @@ extern void VtxTriggerSend();
 extern void ResetPower();
 extern uint8_t adjustPacketRateForBaud(uint8_t rate);
 extern void SetSyncSpam();
+extern void EnterUnbindMode();
 extern bool RxWiFiReadyToSend;
 extern bool BackpackTelemReadyToSend;
 #if defined(USE_TX_BACKPACK)
@@ -321,6 +328,18 @@ extern bool VRxBackpackWiFiReadyToSend;
 extern unsigned long rebootTime;
 extern void setWifiUpdateMode();
 #endif
+
+static void luadevUpdateUID()
+{
+  static const char hexChars[] = "0123456789ABCDEF";
+  for (uint8_t i = 0; i < UID_LEN; ++i)
+  {
+    luaTxUidString[i * 2] = hexChars[(UID[i] >> 4) & 0x0F];
+    luaTxUidString[(i * 2) + 1] = hexChars[UID[i] & 0x0F];
+  }
+  luaTxUidString[UID_LEN * 2] = '\0';
+  setLuaStringValue(&luaTxUid, luaTxUidString);
+}
 
 static void luadevUpdateModelID() {
   itoa(CRSFHandset::getModelID(), modelMatchUnit+6, 10);
@@ -452,6 +471,16 @@ static void luahandWifiBle(struct luaPropertiesCommon *item, uint8_t arg)
   }
 }
 #endif
+
+static void luahandUnbind(struct luaPropertiesCommon *item, uint8_t arg)
+{
+  if (arg < lcsCancel)
+  {
+    EnterUnbindMode();
+    luadevUpdateUID();
+  }
+  sendLuaCommandResponse((struct luaItem_command *)item, lcsIdle, STR_EMPTYSPACE);
+}
 
 static void luahandSimpleSendCmd(struct luaPropertiesCommon *item, uint8_t arg)
 {
@@ -636,6 +665,50 @@ uint8_t adjustSwitchModeForAirRate(OtaSwitchMode_e eSwitchMode, uint8_t packetSi
 static void registerLuaParameters()
 {
   if (HAS_RADIO) {
+    registerLUAParameter(&luaBind, &luahandSimpleSendCmd);
+    registerLUAParameter(&luaUnbind, &luahandUnbind);
+  }
+
+  if (strlen(version) < 21) {
+    strlcpy(version_domain, version, 21);
+    strlcat(version_domain, " ", sizeof(version_domain));
+  } else {
+    strlcpy(version_domain, version, 18);
+    strlcat(version_domain, "... ", sizeof(version_domain));
+  }
+  strlcat(version_domain, FHSSconfig->domain, sizeof(version_domain));
+  registerLUAParameter(&luaELRSversion);
+  registerLUAParameter(&luaTxUid);
+
+  if (HAS_RADIO) {
+
+    // POWER folder
+    registerLUAParameter(&luaPowerFolder);
+    luadevGeneratePowerOpts(&luaPower);
+    registerLUAParameter(&luaPower, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      config.SetPower((PowerLevels_e)constrain(arg + POWERMGNT::getMinPower(), POWERMGNT::getMinPower(), POWERMGNT::getMaxPower()));
+      if (!config.IsModified())
+      {
+          ResetPower();
+      }
+    }, luaPowerFolder.common.id);
+    registerLUAParameter(&luaDynamicPower, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      config.SetDynamicPower(arg > 0);
+      config.SetBoostChannel((arg - 1) > 0 ? arg - 1 : 0);
+    }, luaPowerFolder.common.id);
+  }
+  if (GPIO_PIN_FAN_EN != UNDEF_PIN || GPIO_PIN_FAN_PWM != UNDEF_PIN) {
+    registerLUAParameter(&luaFanThreshold, [](struct luaPropertiesCommon *item, uint8_t arg){
+      config.SetPowerFanThreshold(arg);
+    }, luaPowerFolder.common.id);
+  }
+#if defined(Regulatory_Domain_EU_CE_2400)
+  if (HAS_RADIO) {
+    registerLUAParameter(&luaCELimit, NULL, luaPowerFolder.common.id);
+  }
+#endif
+
+  if (HAS_RADIO) {
     registerLUAParameter(&luaAirRate, [](struct luaPropertiesCommon *item, uint8_t arg) {
     if (arg < RATE_MAX)
     {
@@ -657,6 +730,8 @@ static void registerLuaParameters()
         {
           setLuaWarningFlag(LUA_FLAG_ERROR_BAUDRATE, true);
         }
+        // Update displayed value immediately; event() may not fire before EdgeTX re-reads
+        setLuaTextSelectionValue(&luaAirRate, RATE_MAX - 1 - actualRate);
       }
       else
         setLuaWarningFlag(LUA_FLAG_ERROR_CONNECTED, true);
@@ -732,32 +807,8 @@ static void registerLuaParameters()
         luadevUpdateModelID();
       });
     }
+  }
 
-    // POWER folder
-    registerLUAParameter(&luaPowerFolder);
-    luadevGeneratePowerOpts(&luaPower);
-    registerLUAParameter(&luaPower, [](struct luaPropertiesCommon *item, uint8_t arg) {
-      config.SetPower((PowerLevels_e)constrain(arg + POWERMGNT::getMinPower(), POWERMGNT::getMinPower(), POWERMGNT::getMaxPower()));
-      if (!config.IsModified())
-      {
-          ResetPower();
-      }
-    }, luaPowerFolder.common.id);
-    registerLUAParameter(&luaDynamicPower, [](struct luaPropertiesCommon *item, uint8_t arg) {
-      config.SetDynamicPower(arg > 0);
-      config.SetBoostChannel((arg - 1) > 0 ? arg - 1 : 0);
-    }, luaPowerFolder.common.id);
-  }
-  if (GPIO_PIN_FAN_EN != UNDEF_PIN || GPIO_PIN_FAN_PWM != UNDEF_PIN) {
-    registerLUAParameter(&luaFanThreshold, [](struct luaPropertiesCommon *item, uint8_t arg){
-      config.SetPowerFanThreshold(arg);
-    }, luaPowerFolder.common.id);
-  }
-#if defined(Regulatory_Domain_EU_CE_2400)
-  if (HAS_RADIO) {
-    registerLUAParameter(&luaCELimit, NULL, luaPowerFolder.common.id);
-  }
-#endif
   if ((HAS_RADIO || OPT_USE_TX_BACKPACK) && !firmwareOptions.is_airport) {
     // VTX folder
     registerLUAParameter(&luaVtxFolder);
@@ -845,25 +896,12 @@ static void registerLuaParameters()
   registerLUAParameter(&luaBLEJoystick, &luahandWifiBle);
   #endif
 
-  if (HAS_RADIO) {
-    registerLUAParameter(&luaBind, &luahandSimpleSendCmd);
-  }
-
   registerLUAParameter(&luaInfo);
-  if (strlen(version) < 21) {
-    strlcpy(version_domain, version, 21);
-    strlcat(version_domain, " ", sizeof(version_domain));
-  } else {
-    strlcpy(version_domain, version, 18);
-    strlcat(version_domain, "... ", sizeof(version_domain));
-  }
-  strlcat(version_domain, FHSSconfig->domain, sizeof(version_domain));
-  registerLUAParameter(&luaELRSversion);
-  registerLUAParameter(&luaTxUid);
   registerLUAParameter(NULL);
 #if defined(M0139)
   LUA_FIELD_HIDE(luaWiFiFolder);
   LUA_FIELD_HIDE(luaVtxFolder);
+  LUA_FIELD_HIDE(luaPowerFolder);
 #endif
 }
 
@@ -926,14 +964,7 @@ static int event()
     setLuaStringValue(&luaBackpackVersion, backpackVersion);
   }
   luadevUpdateFolderNames();
-  static const char hexChars[] = "0123456789ABCDEF";
-  for (uint8_t i = 0; i < UID_LEN; ++i)
-  {
-    luaTxUidString[i * 2] = hexChars[(UID[i] >> 4) & 0x0F];
-    luaTxUidString[(i * 2) + 1] = hexChars[UID[i] & 0x0F];
-  }
-  luaTxUidString[UID_LEN * 2] = '\0';
-  setLuaStringValue(&luaTxUid, luaTxUidString);
+  luadevUpdateUID();
   return DURATION_IMMEDIATELY;
 }
 

@@ -1039,6 +1039,33 @@ void EnterBindingModeSafely()
   EnterBindingMode();
 }
 
+static uint32_t psuedo_rand(uint32_t x) {
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+    return x;
+}
+
+void EnterUnbindMode()
+{
+  DBGLN("Entering TX unbind mode");
+  // Generate random UID seeded from time-from-boot XOR hardware unique ID
+  uint32_t seed = millis() ^ HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2();
+  seed = psuedo_rand(seed);
+  uint32_t lo = psuedo_rand(seed);
+  uint32_t hi = psuedo_rand(lo);
+  UID[0] = (lo >> 24) & 0xFF;
+  UID[1] = (lo >> 16) & 0xFF;
+  UID[2] = (lo >>  8) & 0xFF;
+  UID[3] =  lo        & 0xFF;
+  UID[4] = (hi >> 24) & 0xFF;
+  UID[5] = (hi >> 16) & 0xFF;
+  config.SetUID(UID);
+  config.Commit();
+  OtaUpdateCrcInitFromUid();
+  FHSSrandomiseFHSSsequence(uidMacSeedGet());
+}
+
 void ProcessMSPPacket(uint32_t now, mspPacket_t *packet)
 {
 #if !defined(CRITICAL_FLASH)
@@ -1324,13 +1351,6 @@ bool setupHardwareFromOptions()
   return true;
 }
 
-static uint32_t psuedo_rand(uint32_t x) {
-	x ^= x << 13;
-	x ^= x >> 17;
-	x ^= x << 5;
-    return x;
-}
-
 static void setupBindingFromConfig()
 {
   // ModalAI: Make sure the UID is valid too
@@ -1340,31 +1360,40 @@ static void setupBindingFromConfig()
   }
   else
   {
-#if defined(PLATFORM_ESP32)
-    esp_read_mac(UID, ESP_MAC_WIFI_STA);
-#elif defined(PLATFORM_STM32)
-    // ModalAI: Deterministic Pseudo-random ID
-    // Seed is based on the lower 64 bits of the UUID register
-	uint32_t UID_0 = HAL_GetUIDw0();
-	uint32_t UID_1 = HAL_GetUIDw1();
-	uint32_t UID_2 = HAL_GetUIDw2();
-	uint32_t seed = psuedo_rand(UID_0);
-	seed = psuedo_rand(seed ^ UID_1);
-	seed = psuedo_rand(seed ^ UID_2);
-	uint32_t UID_lower = psuedo_rand(seed);
-	uint32_t UID_upper = psuedo_rand(UID_lower);
-	UID[0] = (UID_lower & 0xFF000000) >> 24;
-	UID[1] = (UID_lower & 0x00FF0000) >> 16;
-	UID[2] = (UID_lower & 0x0000FF00) >> 8;
-	UID[3] = (UID_lower & 0x000000FF) >> 0;
-	UID[4] = (UID_upper & 0xFF000000) >> 24;
-	UID[5] = (UID_upper & 0x00FF0000) >> 16;
+    // Check if a saved random UID exists in config (set by EnterUnbindMode)
+    const uint8_t *savedUID = config.GetUID();
+    bool hasSavedUID = false;
+    for (int i = 0; i < UID_LEN; i++) if (savedUID[i] != 0) { hasSavedUID = true; break; }
 
-    // TODO: Save random ID to EEPROM
-    // Modify flashedOptions to make
+    if (hasSavedUID)
+    {
+      memcpy(UID, savedUID, UID_LEN);
+    }
+    else
+    {
+#if defined(PLATFORM_ESP32)
+      esp_read_mac(UID, ESP_MAC_WIFI_STA);
+#elif defined(PLATFORM_STM32)
+      // ModalAI: Deterministic Pseudo-random ID
+      // Seed is based on the lower 64 bits of the UUID register
+      uint32_t UID_0 = HAL_GetUIDw0();
+      uint32_t UID_1 = HAL_GetUIDw1();
+      uint32_t UID_2 = HAL_GetUIDw2();
+      uint32_t seed = psuedo_rand(UID_0);
+      seed = psuedo_rand(seed ^ UID_1);
+      seed = psuedo_rand(seed ^ UID_2);
+      uint32_t UID_lower = psuedo_rand(seed);
+      uint32_t UID_upper = psuedo_rand(UID_lower);
+      UID[0] = (UID_lower & 0xFF000000) >> 24;
+      UID[1] = (UID_lower & 0x00FF0000) >> 16;
+      UID[2] = (UID_lower & 0x0000FF00) >> 8;
+      UID[3] = (UID_lower & 0x000000FF) >> 0;
+      UID[4] = (UID_upper & 0xFF000000) >> 24;
+      UID[5] = (UID_upper & 0x00FF0000) >> 16;
 #else
-    wifi_get_macaddr(STATION_IF, UID);
+      wifi_get_macaddr(STATION_IF, UID);
 #endif
+    }
   }
 
   DBGLN("UID=(%d, %d, %d, %d, %d, %d)",
@@ -1425,9 +1454,6 @@ void setup()
     devicesInit();
     DBGLN("Initialised devices");
 
-    setupBindingFromConfig();
-    FHSSrandomiseFHSSsequence(uidMacSeedGet());
-
     Radio.RXdoneCallback = &RXdoneISR;
     Radio.TXdoneCallback = &TXdoneISR;
 
@@ -1442,7 +1468,8 @@ void setup()
     eeprom.Begin(); // Init the eeprom
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load(); // Load the stored values from eeprom
-    // TODO: if no UID assigned, or UID == 0.0.0.0.0.0, assign a new random ID
+    setupBindingFromConfig();
+    FHSSrandomiseFHSSsequence(uidMacSeedGet());
 
     Radio.currFreq = FHSSgetInitialFreq(); //set frequency first or an error will occur!!!
     #if defined(RADIO_SX127X)
