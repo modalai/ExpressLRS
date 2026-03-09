@@ -158,6 +158,13 @@ static struct luaItem_string luaELRSversion = {
     0  // CRSF_INFO type, no max length needed
 };
 
+static char luaTxUidString[(UID_LEN * 2) + 1] = {0};
+static struct luaItem_string luaTxUid = {
+    {"UID", CRSF_INFO},
+    luaTxUidString,
+    0  // CRSF_INFO type, no max length needed
+};
+
 //---------------------------- WiFi -----------------------------
 static struct luaItem_folder luaWiFiFolder = {
     {"WiFi Connectivity", CRSF_FOLDER}
@@ -852,6 +859,7 @@ static void registerLuaParameters()
   }
   strlcat(version_domain, FHSSconfig->domain, sizeof(version_domain));
   registerLUAParameter(&luaELRSversion);
+  registerLUAParameter(&luaTxUid);
   registerLUAParameter(NULL);
 }
 
@@ -914,6 +922,14 @@ static int event()
     setLuaStringValue(&luaBackpackVersion, backpackVersion);
   }
   luadevUpdateFolderNames();
+  static const char hexChars[] = "0123456789ABCDEF";
+  for (uint8_t i = 0; i < UID_LEN; ++i)
+  {
+    luaTxUidString[i * 2] = hexChars[(UID[i] >> 4) & 0x0F];
+    luaTxUidString[(i * 2) + 1] = hexChars[UID[i] & 0x0F];
+  }
+  luaTxUidString[UID_LEN * 2] = '\0';
+  setLuaStringValue(&luaTxUid, luaTxUidString);
   return DURATION_IMMEDIATELY;
 }
 
