@@ -901,7 +901,6 @@ static void registerLuaParameters()
 #if defined(M0139)
   LUA_FIELD_HIDE(luaWiFiFolder);
   LUA_FIELD_HIDE(luaVtxFolder);
-  LUA_FIELD_HIDE(luaPowerFolder);
 #endif
 }
 
