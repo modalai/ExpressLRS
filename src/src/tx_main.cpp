@@ -74,6 +74,8 @@ uint32_t SyncPacketLastSent = 0;
 volatile uint32_t LastTLMpacketRecvMillis = 0;
 uint32_t TLMpacketReported = 0;
 static bool commitInProgress = false;
+bool fhssLocked = false;
+bool fhssLockPending = false;
 
 LQCALC<25> LQCalc;
 
@@ -408,8 +410,13 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
 void ICACHE_RAM_ATTR HandleFHSS()
 {
   uint8_t modresult = (OtaNonce + 1) % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
+  if (fhssLockPending)
+  {
+    fhssLockPending = false;
+    Radio.SetFrequencyReg(FHSSgetInitialFreq());
+  }
   // If the next packet should be on the next FHSS frequency, do the hop
-  if (!InBindingMode && modresult == 0)
+  if (!InBindingMode && !fhssLocked && modresult == 0)
   {
     // Gemini mode
     // If using DualBand always set the correct frequency band to the radios.  The HighFreq/LowFreq Tx amp is set during config.

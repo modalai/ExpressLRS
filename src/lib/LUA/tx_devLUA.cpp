@@ -9,6 +9,9 @@
 #include "FHSS.h"
 #include "helpers.h"
 
+extern bool fhssLocked;
+extern bool fhssLockPending;
+
 #define STR_LUA_ALLAUX         "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10"
 
 #define STR_LUA_ALLAUX_UPDOWN  "AUX1" LUASYM_ARROW_UP ";AUX1" LUASYM_ARROW_DN ";AUX2" LUASYM_ARROW_UP ";AUX2" LUASYM_ARROW_DN \
@@ -88,6 +91,13 @@ static struct luaItem_selection luaDynamicPower = {
     {"Dynamic", CRSF_TEXT_SELECTION},
     0, // value
     "Off;Dyn;AUX9;AUX10;AUX11;AUX12",
+    STR_EMPTYSPACE
+};
+
+static struct luaItem_selection luaFHSSLock = {
+    {"FHSS Lock", CRSF_TEXT_SELECTION},
+    0, // value
+    luastrOffOn,
     STR_EMPTYSPACE
 };
 
@@ -696,6 +706,11 @@ static void registerLuaParameters()
       config.SetDynamicPower(arg > 0);
       config.SetBoostChannel((arg - 1) > 0 ? arg - 1 : 0);
     }, luaPowerFolder.common.id);
+    registerLUAParameter(&luaFHSSLock, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      fhssLocked = (arg != 0);
+      if (fhssLocked) fhssLockPending = true;
+      setLuaTextSelectionValue(&luaFHSSLock, arg);
+    }, luaPowerFolder.common.id);
   }
   if (GPIO_PIN_FAN_EN != UNDEF_PIN || GPIO_PIN_FAN_PWM != UNDEF_PIN) {
     registerLUAParameter(&luaFanThreshold, [](struct luaPropertiesCommon *item, uint8_t arg){
@@ -944,6 +959,7 @@ static int event()
 
   uint8_t dynamic = config.GetDynamicPower() ? config.GetBoostChannel() + 1 : 0;
   setLuaTextSelectionValue(&luaDynamicPower, dynamic);
+  setLuaTextSelectionValue(&luaFHSSLock, (uint8_t)fhssLocked);
 
   setLuaTextSelectionValue(&luaVtxBand, config.GetVtxBand());
   setLuaUint8Value(&luaVtxChannel, config.GetVtxChannel() + 1);
