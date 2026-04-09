@@ -117,8 +117,8 @@ void hwTimer::callback(void)
         MyTim->setOverflow((HWtimerInterval >> 1), MICROSEC_FORMAT);
 #else
         MyTim->setOverflow((HWtimerInterval >> 1), MICROSEC_FORMAT);
-        uint32_t adjustedInterval = MyTim->getOverflow(TICK_FORMAT) + FreqOffset;
-        MyTim->setOverflow(adjustedInterval, TICK_FORMAT);
+        uint32_t adjustedInterval = MyTim->getOverflow(MICROSEC_FORMAT) + FreqOffset;
+        MyTim->setOverflow(adjustedInterval, MICROSEC_FORMAT);
         hwTimer::callbackTick();
 #endif
     }
@@ -129,8 +129,8 @@ void hwTimer::callback(void)
         hwTimer::callbackTock();
 #else
         MyTim->setOverflow((HWtimerInterval >> 1) + PhaseShift, MICROSEC_FORMAT);
-        uint32_t adjustedInterval = MyTim->getOverflow(TICK_FORMAT) + FreqOffset;
-        MyTim->setOverflow(adjustedInterval, TICK_FORMAT);
+        uint32_t adjustedInterval = MyTim->getOverflow(MICROSEC_FORMAT) + FreqOffset;
+        MyTim->setOverflow(adjustedInterval, MICROSEC_FORMAT);
         PhaseShift = 0;
         hwTimer::callbackTock();
 #endif
