@@ -13,3 +13,4 @@ src/hardware
 RTT/
 src/artifacts
 !src/hardware/targets.json
+.platformio
