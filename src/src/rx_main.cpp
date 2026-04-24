@@ -689,7 +689,7 @@ void ICACHE_RAM_ATTR updatePhaseLock()
             hwTimer::phaseShift(Offset >> 2);
         }
 
-        //DBGVLN("%d:%d:%d:%d:%d", Offset, RawOffset, OffsetDx, hwTimer::getFreqOffset(), uplinkLQ);
+        DBGVLN("%d:%d:%d:%d:%d", Offset, RawOffset, OffsetDx, hwTimer::getFreqOffset(), uplinkLQ);
         UNUSED(OffsetDx); // complier warning if no debug
     }
 
@@ -870,7 +870,7 @@ void ICACHE_RAM_ATTR HWtimerCallbackTock()
 
 void LostConnection(bool resumeRx)
 {
-    DBGLN("lost conn fc=%d fo=%d", FreqCorrection, hwTimer::getFreqOffset());
+    DBGLN("lost conn fc=%d fo=%d arr=%u", FreqCorrection, hwTimer::getFreqOffset(), TIM2->ARR);
 
     // Use this rate as the initial rate next time if we connected on it
     if (connectionState == connected)

@@ -1105,7 +1105,8 @@ TxConfig::SetDefaults(bool commit)
 bool
 TxConfig::SetModelId(uint8_t modelId)
 {
-    model_config_t *newModel = &m_config.model_config[modelId];
+    // Clamp to valid range — on M0139, CONFIG_TX_MODEL_CNT=1 so all models share slot 0
+    model_config_t *newModel = &m_config.model_config[modelId % CONFIG_TX_MODEL_CNT];
     if (newModel != m_model)
     {
         m_model = newModel;
@@ -2084,6 +2085,15 @@ void RxConfig::SetCustomDomainEnabled(bool enable)
     }
 }
 #endif
+
+void RxConfig::SetSyntheticPWM(bool value)
+{
+    if (m_config.syntheticPWM != value)
+    {
+        m_config.syntheticPWM = value;
+        m_modified = true;
+    }
+}
 
 void RxConfig::ReturnLoan()
 {
