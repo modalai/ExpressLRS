@@ -16,8 +16,8 @@ extern device_t ServoOut_device;
 
 extern bool updatePWM;
 extern rx_pwm_config_in pwmInput;
-extern bool overridePWM;
-extern pwm_val_override_t pwmOverride;
+extern bool pinOverride;
+extern pin_output_override_t pinOverrideData;
 extern bool pwmIsArmed;
 
 uint16_t servoGetLastOutputUs(uint8_t ch);

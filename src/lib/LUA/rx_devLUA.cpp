@@ -163,6 +163,7 @@ static const char STR_FAILSAFE_MODE[] = "Failsafe Mode";
 static const char STR_FAILSAFE_VAL[] = "Failsafe (us)";
 static const char STR_MAP_MODE[] = "Map Mode";
 static const char STR_REQUIRES_ARM[] = "Requires Arm";
+static const char STR_SYNTHETIC_PWM[] = "Synthetic PWM";
 static const char STR_PIN_1[] = "Pin 1";
 static const char STR_PIN_2[] = "Pin 2";
 static const char STR_PIN_3[] = "Pin 3";
@@ -338,6 +339,14 @@ static struct luaItem_selection luaArmPWM = {
     {"PWM Armed", CRSF_TEXT_SELECTION},
     0, // value - starts disarmed
     "Disarmed;Armed",
+    STR_EMPTYSPACE
+};
+
+// Synthetic PWM: ignore RF inputs, only accept SET_PWM_VAL override commands
+static struct luaItem_selection luaSyntheticPWM = {
+    {STR_SYNTHETIC_PWM, CRSF_TEXT_SELECTION},
+    0, // value
+    STR_ON_OFF,
     STR_EMPTYSPACE
 };
 
@@ -694,6 +703,14 @@ static void armPWMCallback(struct luaPropertiesCommon *item, uint8_t arg)
 {
     // arg: 0 = Disarmed, 1 = Armed
     pwmIsArmed = (arg == 1);
+    devicesTriggerEvent();
+}
+
+// Synthetic PWM callback - enables/disables override-only mode for all PWM outputs
+static void syntheticPWMCallback(struct luaPropertiesCommon *item, uint8_t arg)
+{
+    if (config.GetSyntheticPWM() == arg) return;
+    config.SetSyntheticPWM(arg);
     devicesTriggerEvent();
 }
 
@@ -1191,6 +1208,8 @@ static void registerLuaParameters()
   {
     // Register Arm PWM command at root level (visible like Bind Mode)
     registerLUAParameter(&luaArmPWM, &armPWMCallback);
+    // Register Synthetic PWM after Arm PWM to preserve ARM_PARAM_INDEX = 9
+    registerLUAParameter(&luaSyntheticPWM, &syntheticPWMCallback);
 
     // Register main Output Mapping folder
     registerLUAParameter(&luaMappingFolder);
@@ -1353,6 +1372,7 @@ static int event()
   {
     // Update PWM Armed status
     setLuaTextSelectionValue(&luaArmPWM, pwmIsArmed ? 1 : 0);
+    setLuaTextSelectionValue(&luaSyntheticPWM, config.GetSyntheticPWM());
 
     // Load current values from config for all pins
     const rx_config_pwm_t *cfg0 = config.GetPwmChannel(0);
@@ -1432,7 +1452,7 @@ static int event()
   updateBindModeLabel();
   updateUnbindModeLabel();
 
-  LUA_FIELD_HIDE(luaSerialProtocol);
+  LUA_FIELD_SHOW(luaSerialProtocol);
 
   if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
   {

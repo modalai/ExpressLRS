@@ -16,7 +16,7 @@
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
 #define TX_CONFIG_VERSION   8U
-#define RX_CONFIG_VERSION   13U
+#define RX_CONFIG_VERSION   14U
 
 #if defined(TARGET_TX)
 
@@ -279,7 +279,8 @@ typedef struct __attribute__((packed)) {
     uint8_t     modelId;
     uint8_t     serialProtocol:4,
                 failsafeMode:2,
-                unused:2;
+                syntheticPWM:1,  // all PWM outputs ignore RF; only SET_PWM_VAL overrides apply
+                unused:1;
     // NOTE: teamrace and sysid fields must remain before pwmChannels so they land
     // within the first 128 bytes of EEPROM (the physical chip capacity on M0184).
     uint8_t     teamraceChannel:4,
@@ -327,6 +328,7 @@ public:
     uint8_t GetSourceSysId()  const { return m_config.sourceSysId; }
     rx_config_bindstorage_t GetBindStorage() const { return (rx_config_bindstorage_t)m_config.bindStorage; }
     bool IsOnLoan() const;
+    bool GetSyntheticPWM() const { return m_config.syntheticPWM; }
 
     // Setters
     void SetUID(uint8_t* uid);
@@ -352,6 +354,7 @@ public:
     void SetTargetSysId(uint8_t sysID);
     void SetSourceSysId(uint8_t sysID);
     void SetBindStorage(rx_config_bindstorage_t value);
+    void SetSyntheticPWM(bool value);
     void ReturnLoan();
 
 private:

@@ -1332,6 +1332,15 @@ void RxConfig::SetSourceSysId(uint8_t value)
     }
 }
 
+void RxConfig::SetSyntheticPWM(bool value)
+{
+    if (m_config.syntheticPWM != value)
+    {
+        m_config.syntheticPWM = value;
+        m_modified = true;
+    }
+}
+
 void RxConfig::ReturnLoan()
 {
     if (IsOnLoan())

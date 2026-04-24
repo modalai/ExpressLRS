@@ -225,10 +225,7 @@ static void servosUpdate(unsigned long now)
     if (newChannelsAvailable)
     {
         newChannelsAvailable = false;
-        if(!overridePWM)
-            lastUpdate = now;
-        else
-            lastUpdate = 0; // Don't let an override cause a failsafe
+        lastUpdate = now;
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
@@ -245,6 +242,13 @@ static void servosUpdate(unsigned long now)
                     servoWrite(ch, 0);
                 }
                 // For LAST_POSITION, do nothing - keep last value
+                continue;
+            }
+
+            // Global synthetic mode: skip all RF-driven updates;
+            // outputs are driven exclusively by SET_PIN_OUTPUT commands
+            if (config.GetSyntheticPWM())
+            {
                 continue;
             }
 
@@ -440,14 +444,15 @@ static int event()
         // config.SetPwmChannel(pwmPin, 0, pwmInputChannel, false, som50Hz, false);
 #endif
     }
-    // Change pwm value from telemetry command
-    if (overridePWM){
-        // Value received over the wire is big-endian, swap it here
-        ChannelData[pwmOverride.rc_channel - 1] = ((pwmOverride.crsf_channel_value & 0xFF) << 8) | ((pwmOverride.crsf_channel_value & 0xFF00) >> 8);
-        newChannelsAvailable = true;
-        servosUpdate(millis());
-
-        overridePWM = false;
+    // Write pin directly from SET_PIN_OUTPUT command — never touches ChannelData[]
+    if (pinOverride) {
+        if (config.GetSyntheticPWM()) {
+            uint16_t val = ((uint16_t)pinOverrideData.val_high << 8) | pinOverrideData.val_low;
+            eServoOutputMode mode = (eServoOutputMode)pinOverrideData.mode;
+            uint16_t us = (mode == somOnOff) ? (val ? 2000 : 1000) : val;
+            servoWrite(pinOverrideData.pin_index, us);
+        }
+        pinOverride = false;
     }
 
 

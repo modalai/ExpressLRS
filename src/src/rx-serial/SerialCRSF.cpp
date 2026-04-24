@@ -40,9 +40,9 @@ static void sendParamToSerial(uint8_t *data)
 extern device_t ServoOut_device;
 
 bool updatePWM = false;
-bool overridePWM = false;
+bool pinOverride = false;
 rx_pwm_config_in pwmInput = {0};
-pwm_val_override_t pwmOverride = {0};
+pin_output_override_t pinOverrideData = {0};
 #endif // Servo output
 
 void SerialCRSF::sendQueuedData(uint32_t maxBytesToSend)
@@ -209,11 +209,11 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
             ServoOut_device.event();
 #endif // Servo output
         }
-        if (telemetry.ShouldCallOverridePWM()){
-            DBGLN("Received PWM Override command");
+        if (telemetry.ShouldCallPinOverride()){
+            DBGLN("Received Pin Output Override command");
 #ifdef GPIO_PIN_PWM_OUTPUTS
-            overridePWM = true;
-            pwmOverride = telemetry.GetPwmOverride();
+            pinOverride = true;
+            pinOverrideData = telemetry.GetPinOverride();
             ServoOut_device.event();
 #endif // Servo output
         }
