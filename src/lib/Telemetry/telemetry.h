@@ -13,15 +13,17 @@ enum CustomTelemSubTypeID : uint8_t {
 
 enum PWMCmd : uint8_t {
     SET_PWM_CH = 0xF3,
-    SET_PWM_VAL = 0xF4,
+    SET_PIN_OUTPUT = 0xF5,
     SET_PWM_DEFAULT = 0xFF
 };
 
-typedef struct pwm_val_override_t {
-    uint8_t command;
-    uint8_t rc_channel;
-    uint16_t crsf_channel_value;
-} __attribute__((packed)) pwm_val_override_t;
+typedef struct pin_output_override_t {
+    uint8_t command;    // 0xF5
+    uint8_t pin_index;  // 0-based physical pin
+    uint8_t mode;       // eServoOutputMode value
+    uint8_t val_high;
+    uint8_t val_low;
+} __attribute__((packed)) pin_output_override_t;
 
 typedef enum {
     TELEMETRY_IDLE = 0,
@@ -70,7 +72,7 @@ public:
     bool ShouldCallEnterBind();
     bool ShouldCallUnbind();
     bool ShouldCallUpdatePWM();
-    bool ShouldCallOverridePWM();
+    bool ShouldCallPinOverride();
     bool ShouldCallUpdateModelMatch();
     bool ShouldSendDeviceFrame();
     void CheckCrsfBatterySensorDetected();
@@ -93,7 +95,7 @@ public:
     const uint8_t* GetParameterRequestData() { return CRSFinBuffer; }  // Returns full packet for STRING parameter writes
 #if defined(TARGET_RX)
     rx_pwm_config_in GetPwmInput(){ return pwmInput;}
-    pwm_val_override_t GetPwmOverride(){ return pwmValueOverride; }
+    pin_output_override_t GetPinOverride(){ return pinOverrideValue; }
 #endif
 private:
     bool processInternalTelemetryPackage(uint8_t *package);
@@ -115,14 +117,14 @@ private:
     bool crsfBaroSensorDetected;
     bool callUpdateUID;
     bool callUpdatePWM;
-    bool callOverridePWM;
+    bool callPinOverride;
     bool callParameterRequest;
     uint8_t modelMatchId;
     uint8_t paramRequestType;
     uint8_t paramRequestIndex;
     uint8_t paramRequestArg;
 #if defined(TARGET_RX)
-    pwm_val_override_t pwmValueOverride;
+    pin_output_override_t pinOverrideValue;
     rx_pwm_config_in pwmInput;
 #endif
 };

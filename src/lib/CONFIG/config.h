@@ -22,7 +22,12 @@
 #if defined(TARGET_TX)
 
 #define CONFIG_TX_BUTTON_ACTION_CNT 2
+// M0139 has limited EEPROM; all models share a single config slot
+#ifdef M0139
+#define CONFIG_TX_MODEL_CNT         1
+#else
 #define CONFIG_TX_MODEL_CNT         64
+#endif
 
 typedef enum {
     HT_OFF,
@@ -301,7 +306,8 @@ typedef struct __attribute__((packed)) {
     uint8_t     modelId;
     uint8_t     serialProtocol:4,
                 failsafeMode:2,
-                unused:2;
+                syntheticPWM:1,  // all PWM outputs ignore RF; only SET_PWM_VAL overrides apply
+                unused:1;
     // NOTE: teamrace and sysid fields must remain before pwmChannels so they land
     // within the first 128 bytes of EEPROM (the physical chip capacity on M0184).
     uint8_t     teamraceChannel:4,
@@ -363,6 +369,7 @@ public:
     uint8_t GetCustomDomainChannels() const;
     bool GetCustomDomainEnabled() const;
 #endif
+    bool GetSyntheticPWM() const { return m_config.syntheticPWM; }
 
     // Setters
     void SetUID(uint8_t* uid);
@@ -388,6 +395,7 @@ public:
     void SetTargetSysId(uint8_t sysID);
     void SetSourceSysId(uint8_t sysID);
     void SetBindStorage(rx_config_bindstorage_t value);
+    void SetSyntheticPWM(bool value);
     void ReturnLoan();
 #if defined(CUSTOM_DOMAIN_ENABLE)
     void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
