@@ -1142,6 +1142,9 @@ RxConfig::SetDefaults(bool commit)
 {
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
+    // All-0xFF uid is treated as bound but matches no TX, keeping RX inert until explicitly bound
+    // warning this will reset bind keys on eeprom updates on FW updates that increment the eeprom version.
+    memset(m_config.uid, 0xFF, UID_LEN);
 
     m_config.version = RX_CONFIG_VERSION | RX_CONFIG_MAGIC;
     m_config.modelId = 0xff;
