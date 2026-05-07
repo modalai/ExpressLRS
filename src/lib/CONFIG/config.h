@@ -4,6 +4,7 @@
 #include "elrs_eeprom.h"
 #include "options.h"
 #include "common.h"
+#include "FHSS.h"
 
 #if defined(PLATFORM_ESP32)
 #include <nvs_flash.h>
@@ -101,6 +102,13 @@ typedef struct {
     tx_button_color_t buttonColors[2];  // FUTURE: TX RGB color / mode (sets color of TX, can be a static color or standard)
                                         // FUTURE: Model RGB color / mode (sets LED color mode on the model, but can be second TX led color too)
                                         // FUTURE: Custom button actions
+    // Custom Frequency parameters
+    uint32_t        custom_domain_start:8; // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
+                    custom_domain_end:8; // 128 = 990 MHz
+                    custom_domain_n_channels:8
+                    custom_domain_band:1; // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port
+                    custom_domain_enable:1; // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
+                    unused:5;
 } tx_config_t;
 
 class TxConfig
@@ -138,6 +146,19 @@ public:
     uint8_t GetPTRStartChannel() const { return m_model->ptrStartChannel; }
     uint8_t GetPTREnableChannel() const { return m_model->ptrEnableChannel; }
     const uint8_t* GetUID() const { return m_config.uid; }
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    fhss_config_t GetCustomDomain() const {
+        uint32_t custom_band_start = m_config.custom_domain_band ? 862 : 410; // Custom band range start MHz
+        return {
+            "CUSTOM",
+            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_start + current_band_start) * 1000000), // Domain start
+            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_end + current_band_start) * 1000000), // Domain end
+            m_config.custom_domain_n_channels, // Domain channel count
+            0 // Domain center (doesn't matter)
+        }; 
+    }
+    bool GetCustomDomainEnabled() const { return m_config.custom_domain_enable; }
+#endif
 
     // Setters
     void SetRate(uint8_t rate);
@@ -167,7 +188,9 @@ public:
     void SetPTRStartChannel(uint8_t ptrStartChannel);
     void SetPTREnableChannel(uint8_t ptrEnableChannel);
     void SetUID(const uint8_t* uid);
-
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
+#endif
     // State setters
     bool SetModelId(uint8_t modelId);
 
@@ -287,6 +310,13 @@ typedef struct __attribute__((packed)) {
                 teamracePitMode:1;  // FUTURE: Enable pit mode when disabling model
     uint8_t     targetSysId;
     uint8_t     sourceSysId;
+    // Custom Frequency parameters
+    uint32_t    custom_domain_start:8; // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
+                custom_domain_end:8; // 128 = 990 MHz
+                custom_domain_n_channels:8
+                custom_domain_band:2; // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port, 2: 137-175
+                custom_domain_enable:1; // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
+                unused:5;
     uint8_t     reserved1;          // padding to keep pwmChannels 4-byte aligned
     rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
 } rx_config_t;
@@ -327,6 +357,19 @@ public:
     uint8_t GetSourceSysId()  const { return m_config.sourceSysId; }
     rx_config_bindstorage_t GetBindStorage() const { return (rx_config_bindstorage_t)m_config.bindStorage; }
     bool IsOnLoan() const;
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    fhss_config_t GetCustomDomain() const {
+        uint32_t custom_band_start = m_config.custom_domain_band ? 862 : 410; // Custom band range start MHz
+        return {
+            "CUSTOM",
+            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_start + current_band_start) * 1000000), // Domain start
+            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_end + current_band_start) * 1000000), // Domain end
+            m_config.custom_domain_n_channels, // Domain channel count
+            0 // Domain center (doesn't matter)
+        }; 
+    }
+    bool GetCustomDomainEnabled() const { return m_config.custom_domain_enable; }
+#endif
 
     // Setters
     void SetUID(uint8_t* uid);
@@ -353,6 +396,9 @@ public:
     void SetSourceSysId(uint8_t sysID);
     void SetBindStorage(rx_config_bindstorage_t value);
     void ReturnLoan();
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
+#endif
 
 private:
     void CheckUpdateFlashedUid(bool skipDescrimCheck);

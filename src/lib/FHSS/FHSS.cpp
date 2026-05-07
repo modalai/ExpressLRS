@@ -42,10 +42,8 @@ const fhss_config_t domains[] = {
 };
 #endif
 
-#if defined(HARDENED_ENABLE)
-const fhss_config_t domains_custom[] = {
-    {"FCC915", FREQ_HZ_TO_REG_VAL(863500000), FREQ_HZ_TO_REG_VAL(96350000), 40, 915000000}
-};
+#if defined(CUSTOM_DOMAIN_ENABLE)
+fhss_config_t CustomFHSSConfig;
 #endif
 
 // Our table of FHSS frequencies. Define a regulatory domain to select the correct set for your location and radio
@@ -80,10 +78,11 @@ uint16_t secondaryBandCount;
 
 void FHSSrandomiseFHSSsequence(const uint32_t seed)
 {
-#if defined(HARDENED_ENABLE)
-    if (config enabled hardnened mode) {
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    if (Config.GetCustomDomainEnabled()) {
 
-        FHSSconfig = &domains_custom[firmwareOptions.domain];
+        CustomFHSSConfig = Config.GetCustomDomain();
+        FHSSconfig = &CustomFHSSConfig;
         sync_channel = (FHSSconfig->freq_count / 2) + 1;
         freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);
         primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
@@ -94,7 +93,7 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
 
         FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
 
-    // No dual-band supported hardened mode yet
+    // No dual-band supported custom mode yet
     } else {
 #endif
     FHSSconfig = &domains[firmwareOptions.domain];
@@ -123,7 +122,7 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
     FHSSusePrimaryFreqBand = true;
 #endif
 
-#if defined(HARDENED_ENABLE)
+#if defined(CUSTOM_DOMAIN_ENABLE)
     } // end else
 #endif
 }
