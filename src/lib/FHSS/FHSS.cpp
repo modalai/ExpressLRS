@@ -42,6 +42,12 @@ const fhss_config_t domains[] = {
 };
 #endif
 
+#if defined(HARDENED_ENABLE)
+const fhss_config_t domains_custom[] = {
+    {"FCC915", FREQ_HZ_TO_REG_VAL(863500000), FREQ_HZ_TO_REG_VAL(96350000), 40, 915000000}
+};
+#endif
+
 // Our table of FHSS frequencies. Define a regulatory domain to select the correct set for your location and radio
 const fhss_config_t *FHSSconfig;
 const fhss_config_t *FHSSconfigDualBand;
@@ -74,6 +80,23 @@ uint16_t secondaryBandCount;
 
 void FHSSrandomiseFHSSsequence(const uint32_t seed)
 {
+#if defined(HARDENED_ENABLE)
+    if (config enabled hardnened mode) {
+
+        FHSSconfig = &domains_custom[firmwareOptions.domain];
+        sync_channel = (FHSSconfig->freq_count / 2) + 1;
+        freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);
+        primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
+
+        DBGLN("Setting %s Mode", FHSSconfig->domain);
+        DBGLN("Number of FHSS frequencies = %u", FHSSconfig->freq_count);
+        DBGLN("Sync channel = %u", sync_channel);
+
+        FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
+
+    // No dual-band supported hardened mode yet
+    } else {
+#endif
     FHSSconfig = &domains[firmwareOptions.domain];
     sync_channel = (FHSSconfig->freq_count / 2) + 1;
     freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);
@@ -98,6 +121,10 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
     FHSSusePrimaryFreqBand = false;
     FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfigDualBand->freq_count, sync_channel_DualBand, FHSSsequence_DualBand);
     FHSSusePrimaryFreqBand = true;
+#endif
+
+#if defined(HARDENED_ENABLE)
+    } // end else
 #endif
 }
 
