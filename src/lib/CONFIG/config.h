@@ -103,11 +103,11 @@ typedef struct {
                                         // FUTURE: Model RGB color / mode (sets LED color mode on the model, but can be second TX led color too)
                                         // FUTURE: Custom button actions
     // Custom Frequency parameters
-    uint32_t        custom_domain_start:8; // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
-                    custom_domain_end:8; // 128 = 990 MHz
-                    custom_domain_n_channels:8
-                    custom_domain_band:1; // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port
-                    custom_domain_enable:1; // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
+    uint32_t        custom_domain_start:8, // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
+                    custom_domain_end:8, // 128 = 990 MHz
+                    custom_domain_n_channels:8,
+                    custom_domain_band:1, // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port
+                    custom_domain_enable:1, // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
                     unused:5;
 } tx_config_t;
 
@@ -311,11 +311,11 @@ typedef struct __attribute__((packed)) {
     uint8_t     targetSysId;
     uint8_t     sourceSysId;
     // Custom Frequency parameters
-    uint32_t    custom_domain_start:8; // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
-                custom_domain_end:8; // 128 = 990 MHz
-                custom_domain_n_channels:8
-                custom_domain_band:2; // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port, 2: 137-175
-                custom_domain_enable:1; // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
+    uint32_t    custom_domain_start:8, // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
+                custom_domain_end:8, // 128 = 990 MHz
+                custom_domain_n_channels:8,
+                custom_domain_band:2, // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port, 2: 137-175
+                custom_domain_enable:1, // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
                 unused:5;
     uint8_t     reserved1;          // padding to keep pwmChannels 4-byte aligned
     rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));

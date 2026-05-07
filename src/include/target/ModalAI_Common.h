@@ -90,7 +90,7 @@ https://github.com/jaxxzer
 #define STM32F1 1 
 #define STM32F1xx 1
 #define SYSCLK_FREQ_72MHz
-#define HARDENED_ENABLE
+#define CUSTOM_DOMAIN_ENABLE
 // #define GPIO_PIN_ANT_CTRL PB10 // Unused pin
 
 // Team race setting now persists across power cycles.
