@@ -16,7 +16,7 @@
 #define TX_CONFIG_MAGIC     (0b01U << 30)
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
-#define TX_CONFIG_VERSION   9U
+#define TX_CONFIG_VERSION   10U
 #define RX_CONFIG_VERSION   14U
 
 #if defined(TARGET_TX)
