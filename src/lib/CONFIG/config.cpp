@@ -493,6 +493,15 @@ void TxConfig::Load()
     if (version == 8)
     {
         UpgradeEepromV8ToV9();
+        version = 9;
+    }
+
+    if (version == 9)
+    {
+        // V9→V10: CONFIG_TX_MODEL_CNT changed on M0139, invalidating the raw struct layout.
+        // No migration — reset all params to defaults.
+        SetDefaults(true);
+        return;
     }
 }
 
