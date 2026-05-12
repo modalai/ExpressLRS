@@ -53,6 +53,28 @@ typedef struct {
     uint8_t         dvrStopDelay:3;
 } v6_tx_config_t;
 
+// V8
+#if defined(TARGET_TX)
+typedef struct {
+    uint32_t        version;
+    uint8_t         vtxBand;
+    uint8_t         vtxChannel;
+    uint8_t         vtxPower;
+    uint8_t         vtxPitmode;
+    uint8_t         powerFanThreshold:4;
+    uint8_t         uid[UID_LEN];
+    model_config_t  model_config[64];
+    uint8_t         fanMode;
+    uint8_t         motionMode:2,
+                    dvrStopDelay:3,
+                    backpackDisable:1,
+                    backpackTlmMode:2;
+    uint8_t         dvrStartDelay:3,
+                    dvrAux:5;
+    tx_button_color_t buttonColors[2];
+} v8_tx_config_t;
+#endif
+
 /***
  * RX config
  ***/
@@ -157,3 +179,36 @@ typedef struct {
 } v7_rx_config_t;
 
 // V8 is just V7 except PWM config inserted 10khz PWM in the middle
+
+// V13
+#if defined(TARGET_RX)
+typedef struct __attribute__((packed)) {
+    uint32_t    version;
+    uint8_t     uid[UID_LEN];
+    uint8_t     unused_padding;
+    uint8_t     serial1Protocol:4,
+                serial1Protocol_unused:4;
+    uint32_t    flash_discriminator;
+    struct __attribute__((packed)) {
+        uint16_t    scale;
+        int16_t     offset;
+    } vbat;
+    uint8_t     bindStorage:2,
+                power:4,
+                antennaMode:2;
+    uint8_t     powerOnCounter:3,
+                forceTlmOff:1,
+                rateInitialIdx:4;
+    uint8_t     modelId;
+    uint8_t     serialProtocol:4,
+                failsafeMode:2,
+                unused:2;
+    uint8_t     teamraceChannel:4,
+                teamracePosition:3,
+                teamracePitMode:1;
+    uint8_t     targetSysId;
+    uint8_t     sourceSysId;
+    uint8_t     reserved1;
+    rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
+} v13_rx_config_t;
+#endif

@@ -2073,6 +2073,8 @@ static void CheckConfigChangePending()
     {
         LostConnection(false);
         config.Commit();
+        FHSSrandomiseFHSSsequence(uidMacSeedGet());
+        SetRFLinkRate(ExpressLRS_nextAirRateIndex, false);
         devicesTriggerEvent();
 #if defined(Regulatory_Domain_EU_CE_2400)
         LBTEnabled = (config.GetPower() > PWR_10mW);

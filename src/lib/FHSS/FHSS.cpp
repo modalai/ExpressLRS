@@ -44,6 +44,11 @@ const fhss_config_t domains[] = {
 
 #if defined(CUSTOM_DOMAIN_ENABLE)
 fhss_config_t CustomFHSSConfig;
+
+fhss_config_t FHSSgetInitialDomain()
+{
+    return domains[firmwareOptions.domain];
+}
 #endif
 
 // Our table of FHSS frequencies. Define a regulatory domain to select the correct set for your location and radio
@@ -79,9 +84,9 @@ uint16_t secondaryBandCount;
 void FHSSrandomiseFHSSsequence(const uint32_t seed)
 {
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    if (Config.GetCustomDomainEnabled()) {
+    if (FHSSuseConfiguredCustomDomain()) {
 
-        CustomFHSSConfig = Config.GetCustomDomain();
+        CustomFHSSConfig = FHSSgetConfiguredCustomDomain();
         FHSSconfig = &CustomFHSSConfig;
         sync_channel = (FHSSconfig->freq_count / 2) + 1;
         freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);

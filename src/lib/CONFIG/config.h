@@ -16,8 +16,8 @@
 #define TX_CONFIG_MAGIC     (0b01U << 30)
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
-#define TX_CONFIG_VERSION   8U
-#define RX_CONFIG_VERSION   13U
+#define TX_CONFIG_VERSION   9U
+#define RX_CONFIG_VERSION   14U
 
 #if defined(TARGET_TX)
 
@@ -147,17 +147,11 @@ public:
     uint8_t GetPTREnableChannel() const { return m_model->ptrEnableChannel; }
     const uint8_t* GetUID() const { return m_config.uid; }
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    fhss_config_t GetCustomDomain() const {
-        uint32_t custom_band_start = m_config.custom_domain_band ? 862 : 410; // Custom band range start MHz
-        return {
-            "CUSTOM",
-            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_start + current_band_start) * 1000000), // Domain start
-            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_end + current_band_start) * 1000000), // Domain end
-            m_config.custom_domain_n_channels, // Domain channel count
-            0 // Domain center (doesn't matter)
-        }; 
-    }
-    bool GetCustomDomainEnabled() const { return m_config.custom_domain_enable; }
+    fhss_config_t GetCustomDomain() const;
+    uint16_t GetCustomDomainStartMHz() const;
+    uint16_t GetCustomDomainEndMHz() const;
+    uint8_t GetCustomDomainChannels() const;
+    bool GetCustomDomainEnabled() const;
 #endif
 
     // Setters
@@ -190,6 +184,10 @@ public:
     void SetUID(const uint8_t* uid);
 #if defined(CUSTOM_DOMAIN_ENABLE)
     void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
+    void SetCustomDomainStartMHz(uint16_t startMHz);
+    void SetCustomDomainEndMHz(uint16_t endMHz);
+    void SetCustomDomainChannels(uint8_t channels);
+    void SetCustomDomainEnabled(bool enable);
 #endif
     // State setters
     bool SetModelId(uint8_t modelId);
@@ -199,6 +197,7 @@ private:
     void UpgradeEepromV5ToV6();
     void UpgradeEepromV6ToV7();
     void UpgradeEepromV7ToV8();
+    void UpgradeEepromV8ToV9();
 #endif
 
     tx_config_t m_config;
@@ -316,7 +315,7 @@ typedef struct __attribute__((packed)) {
                 custom_domain_n_channels:8,
                 custom_domain_band:2, // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port, 2: 137-175
                 custom_domain_enable:1, // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
-                unused:5;
+                custom_domain_unused:5;
     uint8_t     reserved1;          // padding to keep pwmChannels 4-byte aligned
     rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
 } rx_config_t;
@@ -358,17 +357,11 @@ public:
     rx_config_bindstorage_t GetBindStorage() const { return (rx_config_bindstorage_t)m_config.bindStorage; }
     bool IsOnLoan() const;
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    fhss_config_t GetCustomDomain() const {
-        uint32_t custom_band_start = m_config.custom_domain_band ? 862 : 410; // Custom band range start MHz
-        return {
-            "CUSTOM",
-            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_start + current_band_start) * 1000000), // Domain start
-            FREQ_HZ_TO_REG_VAL((m_config.custom_domain_end + current_band_start) * 1000000), // Domain end
-            m_config.custom_domain_n_channels, // Domain channel count
-            0 // Domain center (doesn't matter)
-        }; 
-    }
-    bool GetCustomDomainEnabled() const { return m_config.custom_domain_enable; }
+    fhss_config_t GetCustomDomain() const;
+    uint16_t GetCustomDomainStartMHz() const;
+    uint16_t GetCustomDomainEndMHz() const;
+    uint8_t GetCustomDomainChannels() const;
+    bool GetCustomDomainEnabled() const;
 #endif
 
     // Setters
@@ -398,6 +391,10 @@ public:
     void ReturnLoan();
 #if defined(CUSTOM_DOMAIN_ENABLE)
     void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
+    void SetCustomDomainStartMHz(uint16_t startMHz);
+    void SetCustomDomainEndMHz(uint16_t endMHz);
+    void SetCustomDomainChannels(uint8_t channels);
+    void SetCustomDomainEnabled(bool enable);
 #endif
 
 private:
@@ -409,6 +406,7 @@ private:
     void UpgradeEepromV7V8();
     void UpgradeEepromV9();
     void UpgradeEepromV11();
+    void UpgradeEepromV13ToV14();
 
     rx_config_t m_config;
     ELRS_EEPROM *m_eeprom;

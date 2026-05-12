@@ -41,6 +41,7 @@ void AutoDetect::migrateTo(Handset *that) const
 {
     that->setRCDataCallback(RCdataCallback);
     that->registerParameterUpdateCallback(RecvParameterUpdate);
+    that->registerParameterUpdateDataCallback(RecvParameterUpdateData);
     that->registerCallbacks(connected, disconnected, RecvModelUpdate, OnBindingCommand);
     that->Begin();
     that->setPacketInterval(RequestedRCpacketInterval);

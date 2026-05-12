@@ -118,6 +118,37 @@ static struct luaItem_string luaCELimit = {
 };
 #endif
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+static struct luaItem_folder luaCustomDomainFolder = {
+    {"Custom Domain", CRSF_FOLDER}
+};
+
+static struct luaItem_selection luaCustomDomainEnable = {
+    {"Enable", CRSF_TEXT_SELECTION},
+    0,
+    luastrOffOn,
+    STR_EMPTYSPACE
+};
+
+static struct luaItem_int16 luaCustomDomainStart = {
+    {"Start MHz", CRSF_UINT16},
+    {{915, 410, 1019}},
+    "MHz"
+};
+
+static struct luaItem_int16 luaCustomDomainEnd = {
+    {"End MHz", CRSF_UINT16},
+    {{928, 411, 1020}},
+    "MHz"
+};
+
+static struct luaItem_int8 luaCustomDomainChannels = {
+    {"Channels", CRSF_UINT8},
+    {{20, 2, 255}},
+    "ch"
+};
+#endif
+
 //----------------------------POWER------------------
 
 static struct luaItem_selection luaSwitch = {
@@ -723,6 +754,31 @@ static void registerLuaParameters()
   }
 #endif
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+  if (HAS_RADIO) {
+    registerLUAParameter(&luaCustomDomainFolder);
+    registerLUAParameter(&luaCustomDomainEnable, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      config.SetCustomDomainEnabled(arg != 0);
+      devicesTriggerEvent();
+    }, luaCustomDomainFolder.common.id);
+    registerLUAParameter(&luaCustomDomainStart, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      struct luaItem_int16 *intItem = (struct luaItem_int16 *)item;
+      config.SetCustomDomainStartMHz(intItem->properties.u.value);
+      devicesTriggerEvent();
+    }, luaCustomDomainFolder.common.id);
+    registerLUAParameter(&luaCustomDomainEnd, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      struct luaItem_int16 *intItem = (struct luaItem_int16 *)item;
+      config.SetCustomDomainEndMHz(intItem->properties.u.value);
+      devicesTriggerEvent();
+    }, luaCustomDomainFolder.common.id);
+    registerLUAParameter(&luaCustomDomainChannels, [](struct luaPropertiesCommon *item, uint8_t arg) {
+      struct luaItem_int8 *intItem = (struct luaItem_int8 *)item;
+      config.SetCustomDomainChannels(intItem->properties.u.value);
+      devicesTriggerEvent();
+    }, luaCustomDomainFolder.common.id);
+  }
+#endif
+
   if (HAS_RADIO) {
     registerLUAParameter(&luaAirRate, [](struct luaPropertiesCommon *item, uint8_t arg) {
     if (arg < RATE_MAX)
@@ -961,6 +1017,13 @@ static int event()
   setLuaTextSelectionValue(&luaDynamicPower, dynamic);
   setLuaTextSelectionValue(&luaFHSSLock, (uint8_t)fhssLocked);
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+  setLuaTextSelectionValue(&luaCustomDomainEnable, config.GetCustomDomainEnabled() ? 1 : 0);
+  setLuaUint16Value(&luaCustomDomainStart, config.GetCustomDomainStartMHz());
+  setLuaUint16Value(&luaCustomDomainEnd, config.GetCustomDomainEndMHz());
+  setLuaUint8Value(&luaCustomDomainChannels, config.GetCustomDomainChannels());
+#endif
+
   setLuaTextSelectionValue(&luaVtxBand, config.GetVtxBand());
   setLuaUint8Value(&luaVtxChannel, config.GetVtxChannel() + 1);
   setLuaTextSelectionValue(&luaVtxPwr, config.GetVtxPower());
@@ -998,7 +1061,7 @@ static int start()
   {
     return DURATION_NEVER;
   }
-  handset->registerParameterUpdateCallback(luaParamUpdateReq);
+  handset->registerParameterUpdateDataCallback(luaParamUpdateReqData);
   registerLuaParameters();
 
   setLuaStringValue(&luaInfo, luaBadGoodString);

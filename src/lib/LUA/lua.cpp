@@ -112,8 +112,18 @@ static uint8_t *luaInt8StructToArray(const void *luaStruct, uint8_t *next)
 static uint8_t *luaInt16StructToArray(const void *luaStruct, uint8_t *next)
 {
   const struct luaItem_int16 *p1 = (const struct luaItem_int16 *)luaStruct;
-  memcpy(next, &p1->properties, sizeof(p1->properties));
-  next += sizeof(p1->properties);
+  auto writeBE16 = [](uint8_t *dst, uint16_t value)
+  {
+    dst[0] = value >> 8;
+    dst[1] = value & 0xFF;
+  };
+
+  writeBE16(next, p1->properties.u.value);
+  next += sizeof(uint16_t);
+  writeBE16(next, p1->properties.u.min);
+  next += sizeof(uint16_t);
+  writeBE16(next, p1->properties.u.max);
+  next += sizeof(uint16_t);
   *next++ = 0; // default value byte 1
   *next++ = 0; // default value byte 2
   return (uint8_t *)stpcpy((char *)next, p1->units);
@@ -411,6 +421,71 @@ void luaParamUpdateReqData(uint8_t type, uint8_t index, uint8_t arg, const uint8
 #endif
 }
 
+static bool getParameterWriteValueBytes(const uint8_t *packetData, const uint8_t **valueBytes, uint8_t *valueLen)
+{
+  if (packetData == nullptr || valueBytes == nullptr || valueLen == nullptr)
+  {
+    return false;
+  }
+
+  const crsf_ext_header_t *header = (const crsf_ext_header_t *)packetData;
+  const uint8_t payloadLen = header->frame_size - CRSF_FRAME_LENGTH_EXT_TYPE_CRC;
+  if (payloadLen == 0)
+  {
+    return false;
+  }
+
+  uint8_t valueOffset = 1;
+  if (header->payload[0] == header->dest_addr)
+  {
+    valueOffset = 2;
+  }
+
+  if (payloadLen <= valueOffset)
+  {
+    return false;
+  }
+
+  *valueBytes = &header->payload[valueOffset];
+  *valueLen = payloadLen - valueOffset;
+  return true;
+}
+
+static void updateLuaCachedWriteValue(struct luaPropertiesCommon *param, uint8_t dataType, uint8_t arg, const uint8_t *writeValueBytes, uint8_t writeValueLen)
+{
+  if (param == nullptr)
+  {
+    return;
+  }
+
+  switch (dataType)
+  {
+    case CRSF_TEXT_SELECTION:
+      ((struct luaItem_selection *)param)->value = arg;
+      break;
+    case CRSF_UINT8:
+      ((struct luaItem_int8 *)param)->properties.u.value = arg;
+      break;
+    case CRSF_INT8:
+      ((struct luaItem_int8 *)param)->properties.s.value = (int8_t)arg;
+      break;
+    case CRSF_UINT16:
+      if (writeValueBytes != nullptr && writeValueLen >= 2)
+      {
+        ((struct luaItem_int16 *)param)->properties.u.value = ((uint16_t)writeValueBytes[0] << 8) | writeValueBytes[1];
+      }
+      break;
+    case CRSF_INT16:
+      if (writeValueBytes != nullptr && writeValueLen >= 2)
+      {
+        ((struct luaItem_int16 *)param)->properties.s.value = (int16_t)(((uint16_t)writeValueBytes[0] << 8) | writeValueBytes[1]);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 #ifdef TARGET_RX
 void luaParamUpdateReqSerial(uint8_t type, uint8_t index, uint8_t arg, void (*callback)(uint8_t*))
 {
@@ -515,7 +590,8 @@ bool luaHandleUpdateParameter()
         uint8_t arg = parameterArg;
         struct luaPropertiesCommon *p = paramDefinitions[id];
         const uint8_t *chunkData = nullptr;
-        uint8_t chunkDataLen = 0;
+        const uint8_t *writeValueBytes = nullptr;
+        uint8_t writeValueLen = 0;
 
         if (parameterData != nullptr)
         {
@@ -525,15 +601,16 @@ bool luaHandleUpdateParameter()
             uint8_t chunkSize = frameSize - CRSF_FRAME_LENGTH_EXT_TYPE_CRC;
             if (chunkSize > 2)
             {
-              chunkDataLen = chunkSize - 2;
               chunkData = &parameterData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1];
             }
           }
+
+          getParameterWriteValueBytes(parameterData, &writeValueBytes, &writeValueLen);
         }
 
-        // Handle STRING parameter writes specially
-        uint8_t dataType = p->type & CRSF_FIELD_TYPE_MASK;
-          if (dataType == CRSF_STRING && parameterData != nullptr) {
+	        // Handle STRING parameter writes specially
+	        uint8_t dataType = p->type & CRSF_FIELD_TYPE_MASK;
+	          if (dataType == CRSF_STRING && parameterData != nullptr) {
           // Extract string from packet data
           // CRSF_TELEMETRY_FIELD_CHUNK_INDEX points to the arg byte
           // String data starts at the NEXT byte (index + 1)
@@ -549,24 +626,14 @@ bool luaHandleUpdateParameter()
           DBGLN("Copied to param buffer: '%s' (len=%u)", stringParam->value, strlen(stringParam->value));
 
           // Call the callback if registered
-          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
-            paramCallbacks[id](p, 0);  // arg is not used for STRING types
-          }
-        } else {
-          if ((dataType == CRSF_UINT16 || dataType == CRSF_INT16) && chunkData != nullptr && chunkDataLen >= 2)
-          {
-            struct luaItem_int16 *intParam = (struct luaItem_int16 *)p;
-            uint16_t beVal = ((uint16_t)chunkData[0] << 8) | chunkData[1];
-            intParam->properties.u.value = beVal;
-            // Optional: update min/max if included
-            if (chunkDataLen >= sizeof(intParam->properties))
-            {
-              memcpy(&intParam->properties, chunkData, sizeof(intParam->properties));
-            }
-          }
-          // Handle numeric parameter writes
-          DBGLN("Set Lua [%s]=%u", p->name, arg);
-          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
+	          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
+	            paramCallbacks[id](p, 0);  // arg is not used for STRING types
+	          }
+	        } else {
+	          updateLuaCachedWriteValue(p, dataType, arg, writeValueBytes, writeValueLen);
+	          // Handle numeric parameter writes
+	          DBGLN("Set Lua [%s]=%u", p->name, arg);
+	          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
             // While the command is executing, the handset will send `WRITE state=lcsQuery`.
             // paramCallbacks will set the value when nextStatusChunk == 0, or send any
             // remaining chunks when nextStatusChunk != 0

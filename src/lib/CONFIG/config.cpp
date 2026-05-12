@@ -99,6 +99,217 @@ static void ModelV6toV7(v6_model_config_t const * const v6, model_config_t * con
     v7->boostChannel = v6->boostChannel;
 }
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+namespace {
+constexpr uint8_t CUSTOM_DOMAIN_HIGH_BAND = 0;
+constexpr uint8_t CUSTOM_DOMAIN_LOW_BAND = 1;
+constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_START_MHZ = 862;
+constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ = 1020;
+constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_START_MHZ = 410;
+constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ = 525;
+constexpr uint8_t CUSTOM_DOMAIN_MIN_CHANNELS = 2;
+constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_CHANNELS = 20;
+
+static uint16_t clampCustomDomainMHz(uint16_t value, uint16_t minValue, uint16_t maxValue)
+{
+    if (value < minValue)
+    {
+        return minValue;
+    }
+    if (value > maxValue)
+    {
+        return maxValue;
+    }
+    return value;
+}
+
+static uint8_t clampCustomDomainChannels(uint8_t channels)
+{
+    return channels < CUSTOM_DOMAIN_MIN_CHANNELS ? CUSTOM_DOMAIN_DEFAULT_CHANNELS : channels;
+}
+
+static uint8_t customDomainBandFromMHz(uint16_t freqMHz)
+{
+    return freqMHz < CUSTOM_DOMAIN_HIGH_BAND_START_MHZ ? CUSTOM_DOMAIN_LOW_BAND : CUSTOM_DOMAIN_HIGH_BAND;
+}
+
+static uint16_t customDomainBandStartMHz(uint8_t band)
+{
+    return band == CUSTOM_DOMAIN_LOW_BAND ? CUSTOM_DOMAIN_LOW_BAND_START_MHZ : CUSTOM_DOMAIN_HIGH_BAND_START_MHZ;
+}
+
+static uint16_t customDomainBandStopMHz(uint8_t band)
+{
+    return band == CUSTOM_DOMAIN_LOW_BAND ? CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ : CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ;
+}
+
+template <typename TConfig>
+static void normalizeCustomDomain(TConfig &cfg)
+{
+    cfg.custom_domain_band = cfg.custom_domain_band == CUSTOM_DOMAIN_LOW_BAND ? CUSTOM_DOMAIN_LOW_BAND : CUSTOM_DOMAIN_HIGH_BAND;
+
+    const uint16_t bandStartMHz = customDomainBandStartMHz(cfg.custom_domain_band);
+    const uint16_t bandStopMHz = customDomainBandStopMHz(cfg.custom_domain_band);
+    uint16_t startMHz = bandStartMHz + cfg.custom_domain_start;
+    uint16_t endMHz = bandStartMHz + cfg.custom_domain_end;
+
+    cfg.custom_domain_n_channels = clampCustomDomainChannels(cfg.custom_domain_n_channels);
+    startMHz = clampCustomDomainMHz(startMHz, bandStartMHz, bandStopMHz - 1);
+    endMHz = clampCustomDomainMHz(endMHz, bandStartMHz + 1, bandStopMHz);
+
+    if (endMHz <= startMHz)
+    {
+        if (startMHz >= bandStopMHz)
+        {
+            startMHz = bandStopMHz - 1;
+        }
+        endMHz = startMHz + 1;
+    }
+
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+}
+
+template <typename TConfig>
+static uint16_t customDomainStartMHz(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+    return customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_start;
+}
+
+template <typename TConfig>
+static uint16_t customDomainEndMHz(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+    return customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_end;
+}
+
+template <typename TConfig>
+static uint8_t customDomainChannels(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+    return cfg.custom_domain_n_channels;
+}
+
+template <typename TConfig>
+static fhss_config_t buildCustomDomain(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+
+    const uint16_t startMHz = customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_start;
+    const uint16_t endMHz = customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_end;
+    const uint32_t centerHz = ((uint32_t)startMHz + (uint32_t)endMHz) * 500000U;
+
+    return {
+        "CUSTOM",
+        FREQ_HZ_TO_REG_VAL((uint32_t)startMHz * 1000000U),
+        FREQ_HZ_TO_REG_VAL((uint32_t)endMHz * 1000000U),
+        cfg.custom_domain_n_channels,
+        centerHz
+    };
+}
+
+#if defined(RADIO_LR1121)
+static uint16_t customDomainRegToMHz(uint32_t regFreq)
+{
+    return regFreq / 1000000U;
+}
+#else
+static uint16_t customDomainRegToMHz(uint32_t regFreq)
+{
+    return (uint16_t)(((double)regFreq * FREQ_STEP / 1000000.0) + 0.5);
+}
+#endif
+
+template <typename TConfig>
+static void setCustomDomainFromConfig(TConfig &cfg, const fhss_config_t &domain)
+{
+    const uint16_t startMHz = customDomainRegToMHz(domain.freq_start);
+    const uint16_t endMHz = customDomainRegToMHz(domain.freq_stop);
+    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint16_t bandStartMHz = customDomainBandStartMHz(band);
+
+    cfg.custom_domain_band = band;
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+    cfg.custom_domain_n_channels = domain.freq_count;
+    cfg.custom_domain_enable = false;
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainStartMHz(TConfig &cfg, uint16_t startMHz)
+{
+    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint16_t bandStartMHz = customDomainBandStartMHz(band);
+    const uint16_t bandStopMHz = customDomainBandStopMHz(band);
+
+    startMHz = clampCustomDomainMHz(startMHz, bandStartMHz, bandStopMHz - 1);
+
+    uint16_t endMHz = customDomainEndMHz(cfg);
+    if (customDomainBandFromMHz(endMHz) != band)
+    {
+        endMHz = bandStopMHz;
+    }
+    endMHz = clampCustomDomainMHz(endMHz, startMHz + 1, bandStopMHz);
+
+    cfg.custom_domain_band = band;
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainEndMHz(TConfig &cfg, uint16_t endMHz)
+{
+    const uint8_t band = customDomainBandFromMHz(endMHz);
+    const uint16_t bandStartMHz = customDomainBandStartMHz(band);
+    const uint16_t bandStopMHz = customDomainBandStopMHz(band);
+
+    endMHz = clampCustomDomainMHz(endMHz, bandStartMHz + 1, bandStopMHz);
+
+    uint16_t startMHz = customDomainStartMHz(cfg);
+    if (customDomainBandFromMHz(startMHz) != band)
+    {
+        startMHz = bandStartMHz;
+    }
+    startMHz = clampCustomDomainMHz(startMHz, bandStartMHz, endMHz - 1);
+
+    cfg.custom_domain_band = band;
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainChannels(TConfig &cfg, uint8_t channels)
+{
+    cfg.custom_domain_n_channels = clampCustomDomainChannels(channels);
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainEnabled(TConfig &cfg, bool enable)
+{
+    if (enable)
+    {
+        normalizeCustomDomain(cfg);
+    }
+    cfg.custom_domain_enable = enable;
+}
+} // namespace
+
+bool FHSSuseConfiguredCustomDomain()
+{
+    return config.GetCustomDomainEnabled();
+}
+
+fhss_config_t FHSSgetConfiguredCustomDomain()
+{
+    return config.GetCustomDomain();
+}
+#endif
+
 TxConfig::TxConfig() :
     m_model(m_config.model_config)
 {
@@ -189,6 +400,26 @@ void TxConfig::Load()
         nvs_get_blob(handle, "uid", m_config.uid, &uid_len);
     }
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    if (version >= 9)
+    {
+        if (nvs_get_u8(handle, "cdstart", &value8) == ESP_OK)
+            m_config.custom_domain_start = value8;
+        if (nvs_get_u8(handle, "cdend", &value8) == ESP_OK)
+            m_config.custom_domain_end = value8;
+        if (nvs_get_u8(handle, "cdnchan", &value8) == ESP_OK)
+            m_config.custom_domain_n_channels = value8;
+        if (nvs_get_u8(handle, "cdband", &value8) == ESP_OK)
+            m_config.custom_domain_band = value8;
+        if (nvs_get_u8(handle, "cden", &value8) == ESP_OK)
+            m_config.custom_domain_enable = value8;
+    }
+    else
+    {
+        m_modified |= MAIN_CHANGED;
+    }
+#endif
+
     for(unsigned i=0; i<CONFIG_TX_MODEL_CNT; i++)
     {
         char model[10] = "model";
@@ -256,6 +487,12 @@ void TxConfig::Load()
     if (version == 7)
     {
         UpgradeEepromV7ToV8();
+        version = 8;
+    }
+
+    if (version == 8)
+    {
+        UpgradeEepromV8ToV9();
     }
 }
 
@@ -317,6 +554,18 @@ void TxConfig::UpgradeEepromV7ToV8()
     m_modified = ALL_CHANGED;
     Commit();
 }
+
+void TxConfig::UpgradeEepromV8ToV9()
+{
+    v8_tx_config_t v8Config;
+    m_eeprom->Get(0, v8Config);
+
+    SetDefaults(false);
+    memcpy(&m_config, &v8Config, sizeof(v8Config));
+    m_config.version = 9U | TX_CONFIG_MAGIC;
+    m_modified = ALL_CHANGED;
+    Commit();
+}
 #endif
 
 void
@@ -364,6 +613,13 @@ TxConfig::Commit()
         nvs_set_u8(handle, "dvraux", m_config.dvrAux);
         nvs_set_u8(handle, "dvrstartdelay", m_config.dvrStartDelay);
         nvs_set_u8(handle, "dvrstopdelay", m_config.dvrStopDelay);
+#if defined(CUSTOM_DOMAIN_ENABLE)
+        nvs_set_u8(handle, "cdstart", m_config.custom_domain_start);
+        nvs_set_u8(handle, "cdend", m_config.custom_domain_end);
+        nvs_set_u8(handle, "cdnchan", m_config.custom_domain_n_channels);
+        nvs_set_u8(handle, "cdband", m_config.custom_domain_band);
+        nvs_set_u8(handle, "cden", m_config.custom_domain_enable);
+#endif
     }
     if (m_modified & BUTTON_CHANGED)
     {
@@ -647,11 +903,132 @@ TxConfig::SetUID(const uint8_t* uid)
     }
 }
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+fhss_config_t
+TxConfig::GetCustomDomain() const
+{
+    return buildCustomDomain(m_config);
+}
+
+uint16_t
+TxConfig::GetCustomDomainStartMHz() const
+{
+    return customDomainStartMHz(m_config);
+}
+
+uint16_t
+TxConfig::GetCustomDomainEndMHz() const
+{
+    return customDomainEndMHz(m_config);
+}
+
+uint8_t
+TxConfig::GetCustomDomainChannels() const
+{
+    return customDomainChannels(m_config);
+}
+
+bool
+TxConfig::GetCustomDomainEnabled() const
+{
+    return m_config.custom_domain_enable;
+}
+
+void
+TxConfig::SetCustomDomain(const fhss_config_t *new_custom_domain, bool enable)
+{
+    if (new_custom_domain != nullptr)
+    {
+        SetCustomDomainStartMHz(customDomainRegToMHz(new_custom_domain->freq_start));
+        SetCustomDomainEndMHz(customDomainRegToMHz(new_custom_domain->freq_stop));
+        SetCustomDomainChannels(new_custom_domain->freq_count);
+    }
+    SetCustomDomainEnabled(enable);
+}
+
+void
+TxConfig::SetCustomDomainStartMHz(uint16_t startMHz)
+{
+    tx_config_t next = m_config;
+    setCustomDomainStartMHz(next, startMHz);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_modified |= MAIN_CHANGED;
+    }
+}
+
+void
+TxConfig::SetCustomDomainEndMHz(uint16_t endMHz)
+{
+    tx_config_t next = m_config;
+    setCustomDomainEndMHz(next, endMHz);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_modified |= MAIN_CHANGED;
+    }
+}
+
+void
+TxConfig::SetCustomDomainChannels(uint8_t channels)
+{
+    tx_config_t next = m_config;
+    setCustomDomainChannels(next, channels);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_modified |= MAIN_CHANGED;
+    }
+}
+
+void
+TxConfig::SetCustomDomainEnabled(bool enable)
+{
+    tx_config_t next = m_config;
+    setCustomDomainEnabled(next, enable);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band
+        || m_config.custom_domain_enable != next.custom_domain_enable)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_config.custom_domain_enable = next.custom_domain_enable;
+        m_modified |= MAIN_CHANGED;
+    }
+}
+#endif
+
 void
 TxConfig::SetDefaults(bool commit)
 {
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    setCustomDomainFromConfig(m_config, FHSSgetInitialDomain());
+#endif
 
     m_config.version = TX_CONFIG_VERSION | TX_CONFIG_MAGIC;
     m_config.powerFanThreshold = PWR_250mW;
@@ -748,6 +1125,217 @@ TxConfig::SetModelId(uint8_t modelId)
 #include "flash_hal.h"
 #endif
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+namespace {
+constexpr uint8_t CUSTOM_DOMAIN_HIGH_BAND = 0;
+constexpr uint8_t CUSTOM_DOMAIN_LOW_BAND = 1;
+constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_START_MHZ = 862;
+constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ = 1020;
+constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_START_MHZ = 410;
+constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ = 525;
+constexpr uint8_t CUSTOM_DOMAIN_MIN_CHANNELS = 2;
+constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_CHANNELS = 20;
+
+static uint16_t clampCustomDomainMHz(uint16_t value, uint16_t minValue, uint16_t maxValue)
+{
+    if (value < minValue)
+    {
+        return minValue;
+    }
+    if (value > maxValue)
+    {
+        return maxValue;
+    }
+    return value;
+}
+
+static uint8_t clampCustomDomainChannels(uint8_t channels)
+{
+    return channels < CUSTOM_DOMAIN_MIN_CHANNELS ? CUSTOM_DOMAIN_DEFAULT_CHANNELS : channels;
+}
+
+static uint8_t customDomainBandFromMHz(uint16_t freqMHz)
+{
+    return freqMHz < CUSTOM_DOMAIN_HIGH_BAND_START_MHZ ? CUSTOM_DOMAIN_LOW_BAND : CUSTOM_DOMAIN_HIGH_BAND;
+}
+
+static uint16_t customDomainBandStartMHz(uint8_t band)
+{
+    return band == CUSTOM_DOMAIN_LOW_BAND ? CUSTOM_DOMAIN_LOW_BAND_START_MHZ : CUSTOM_DOMAIN_HIGH_BAND_START_MHZ;
+}
+
+static uint16_t customDomainBandStopMHz(uint8_t band)
+{
+    return band == CUSTOM_DOMAIN_LOW_BAND ? CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ : CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ;
+}
+
+template <typename TConfig>
+static void normalizeCustomDomain(TConfig &cfg)
+{
+    cfg.custom_domain_band = cfg.custom_domain_band == CUSTOM_DOMAIN_LOW_BAND ? CUSTOM_DOMAIN_LOW_BAND : CUSTOM_DOMAIN_HIGH_BAND;
+
+    const uint16_t bandStartMHz = customDomainBandStartMHz(cfg.custom_domain_band);
+    const uint16_t bandStopMHz = customDomainBandStopMHz(cfg.custom_domain_band);
+    uint16_t startMHz = bandStartMHz + cfg.custom_domain_start;
+    uint16_t endMHz = bandStartMHz + cfg.custom_domain_end;
+
+    cfg.custom_domain_n_channels = clampCustomDomainChannels(cfg.custom_domain_n_channels);
+    startMHz = clampCustomDomainMHz(startMHz, bandStartMHz, bandStopMHz - 1);
+    endMHz = clampCustomDomainMHz(endMHz, bandStartMHz + 1, bandStopMHz);
+
+    if (endMHz <= startMHz)
+    {
+        if (startMHz >= bandStopMHz)
+        {
+            startMHz = bandStopMHz - 1;
+        }
+        endMHz = startMHz + 1;
+    }
+
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+}
+
+template <typename TConfig>
+static uint16_t customDomainStartMHz(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+    return customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_start;
+}
+
+template <typename TConfig>
+static uint16_t customDomainEndMHz(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+    return customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_end;
+}
+
+template <typename TConfig>
+static uint8_t customDomainChannels(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+    return cfg.custom_domain_n_channels;
+}
+
+template <typename TConfig>
+static fhss_config_t buildCustomDomain(TConfig cfg)
+{
+    normalizeCustomDomain(cfg);
+
+    const uint16_t startMHz = customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_start;
+    const uint16_t endMHz = customDomainBandStartMHz(cfg.custom_domain_band) + cfg.custom_domain_end;
+    const uint32_t centerHz = ((uint32_t)startMHz + (uint32_t)endMHz) * 500000U;
+
+    return {
+        "CUSTOM",
+        FREQ_HZ_TO_REG_VAL((uint32_t)startMHz * 1000000U),
+        FREQ_HZ_TO_REG_VAL((uint32_t)endMHz * 1000000U),
+        cfg.custom_domain_n_channels,
+        centerHz
+    };
+}
+
+#if defined(RADIO_LR1121)
+static uint16_t customDomainRegToMHz(uint32_t regFreq)
+{
+    return regFreq / 1000000U;
+}
+#else
+static uint16_t customDomainRegToMHz(uint32_t regFreq)
+{
+    return (uint16_t)(((double)regFreq * FREQ_STEP / 1000000.0) + 0.5);
+}
+#endif
+
+template <typename TConfig>
+static void setCustomDomainFromConfig(TConfig &cfg, const fhss_config_t &domain)
+{
+    const uint16_t startMHz = customDomainRegToMHz(domain.freq_start);
+    const uint16_t endMHz = customDomainRegToMHz(domain.freq_stop);
+    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint16_t bandStartMHz = customDomainBandStartMHz(band);
+
+    cfg.custom_domain_band = band;
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+    cfg.custom_domain_n_channels = domain.freq_count;
+    cfg.custom_domain_enable = false;
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainStartMHz(TConfig &cfg, uint16_t startMHz)
+{
+    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint16_t bandStartMHz = customDomainBandStartMHz(band);
+    const uint16_t bandStopMHz = customDomainBandStopMHz(band);
+
+    startMHz = clampCustomDomainMHz(startMHz, bandStartMHz, bandStopMHz - 1);
+
+    uint16_t endMHz = customDomainEndMHz(cfg);
+    if (customDomainBandFromMHz(endMHz) != band)
+    {
+        endMHz = bandStopMHz;
+    }
+    endMHz = clampCustomDomainMHz(endMHz, startMHz + 1, bandStopMHz);
+
+    cfg.custom_domain_band = band;
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainEndMHz(TConfig &cfg, uint16_t endMHz)
+{
+    const uint8_t band = customDomainBandFromMHz(endMHz);
+    const uint16_t bandStartMHz = customDomainBandStartMHz(band);
+    const uint16_t bandStopMHz = customDomainBandStopMHz(band);
+
+    endMHz = clampCustomDomainMHz(endMHz, bandStartMHz + 1, bandStopMHz);
+
+    uint16_t startMHz = customDomainStartMHz(cfg);
+    if (customDomainBandFromMHz(startMHz) != band)
+    {
+        startMHz = bandStartMHz;
+    }
+    startMHz = clampCustomDomainMHz(startMHz, bandStartMHz, endMHz - 1);
+
+    cfg.custom_domain_band = band;
+    cfg.custom_domain_start = startMHz - bandStartMHz;
+    cfg.custom_domain_end = endMHz - bandStartMHz;
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainChannels(TConfig &cfg, uint8_t channels)
+{
+    cfg.custom_domain_n_channels = clampCustomDomainChannels(channels);
+    normalizeCustomDomain(cfg);
+}
+
+template <typename TConfig>
+static void setCustomDomainEnabled(TConfig &cfg, bool enable)
+{
+    if (enable)
+    {
+        normalizeCustomDomain(cfg);
+    }
+    cfg.custom_domain_enable = enable;
+}
+} // namespace
+
+bool FHSSuseConfiguredCustomDomain()
+{
+    return config.GetCustomDomainEnabled();
+}
+
+fhss_config_t FHSSgetConfiguredCustomDomain()
+{
+    return config.GetCustomDomain();
+}
+#endif
+
 RxConfig::RxConfig()
 {
 }
@@ -783,6 +1371,13 @@ void RxConfig::Load()
     if (version == 11)
     {
         UpgradeEepromV11();
+        CheckUpdateFlashedUid(false);
+        return;
+    }
+
+    if (version == 13)
+    {
+        UpgradeEepromV13ToV14();
         CheckUpdateFlashedUid(false);
         return;
     }
@@ -1007,6 +1602,50 @@ void RxConfig::UpgradeEepromV11()
     Commit();
 }
 
+void RxConfig::UpgradeEepromV13ToV14()
+{
+    v13_rx_config_t v13Config;
+    m_eeprom->Get(0, v13Config);
+
+    SetDefaults(false);
+
+    memcpy(m_config.uid, v13Config.uid, UID_LEN);
+    #define LAZY(member) m_config.member = v13Config.member
+    LAZY(unused_padding);
+    LAZY(serial1Protocol);
+    LAZY(serial1Protocol_unused);
+    LAZY(flash_discriminator);
+    LAZY(bindStorage);
+    LAZY(power);
+    LAZY(antennaMode);
+    LAZY(powerOnCounter);
+    LAZY(forceTlmOff);
+    LAZY(rateInitialIdx);
+    LAZY(modelId);
+    LAZY(serialProtocol);
+    LAZY(failsafeMode);
+    LAZY(unused);
+    LAZY(teamraceChannel);
+    LAZY(teamracePosition);
+    LAZY(teamracePitMode);
+    LAZY(targetSysId);
+    LAZY(sourceSysId);
+    LAZY(reserved1);
+    #undef LAZY
+
+    m_config.vbat.scale = v13Config.vbat.scale;
+    m_config.vbat.offset = v13Config.vbat.offset;
+
+    for (uint8_t i = 0; i < PWM_MAX_CHANNELS; ++i)
+    {
+        m_config.pwmChannels[i] = v13Config.pwmChannels[i];
+    }
+
+    m_config.version = RX_CONFIG_VERSION | RX_CONFIG_MAGIC;
+    m_modified = true;
+    Commit();
+}
+
 bool RxConfig::GetIsBound() const
 {
     if (m_config.bindStorage == BINDSTORAGE_VOLATILE)
@@ -1142,6 +1781,9 @@ RxConfig::SetDefaults(bool commit)
 {
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    setCustomDomainFromConfig(m_config, FHSSgetInitialDomain());
+#endif
     // All-0xFF uid is treated as bound but matches no TX, keeping RX inert until explicitly bound
     // warning this will reset bind keys on eeprom updates on FW updates that increment the eeprom version.
     memset(m_config.uid, 0xFF, UID_LEN);
@@ -1334,6 +1976,114 @@ void RxConfig::SetSourceSysId(uint8_t value)
         m_modified = true;
     }
 }
+
+#if defined(CUSTOM_DOMAIN_ENABLE)
+fhss_config_t RxConfig::GetCustomDomain() const
+{
+    return buildCustomDomain(m_config);
+}
+
+uint16_t RxConfig::GetCustomDomainStartMHz() const
+{
+    return customDomainStartMHz(m_config);
+}
+
+uint16_t RxConfig::GetCustomDomainEndMHz() const
+{
+    return customDomainEndMHz(m_config);
+}
+
+uint8_t RxConfig::GetCustomDomainChannels() const
+{
+    return customDomainChannels(m_config);
+}
+
+bool RxConfig::GetCustomDomainEnabled() const
+{
+    return m_config.custom_domain_enable;
+}
+
+void RxConfig::SetCustomDomain(const fhss_config_t *new_custom_domain, bool enable)
+{
+    if (new_custom_domain != nullptr)
+    {
+        SetCustomDomainStartMHz(customDomainRegToMHz(new_custom_domain->freq_start));
+        SetCustomDomainEndMHz(customDomainRegToMHz(new_custom_domain->freq_stop));
+        SetCustomDomainChannels(new_custom_domain->freq_count);
+    }
+    SetCustomDomainEnabled(enable);
+}
+
+void RxConfig::SetCustomDomainStartMHz(uint16_t startMHz)
+{
+    rx_config_t next = m_config;
+    setCustomDomainStartMHz(next, startMHz);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_modified = true;
+    }
+}
+
+void RxConfig::SetCustomDomainEndMHz(uint16_t endMHz)
+{
+    rx_config_t next = m_config;
+    setCustomDomainEndMHz(next, endMHz);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_modified = true;
+    }
+}
+
+void RxConfig::SetCustomDomainChannels(uint8_t channels)
+{
+    rx_config_t next = m_config;
+    setCustomDomainChannels(next, channels);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_modified = true;
+    }
+}
+
+void RxConfig::SetCustomDomainEnabled(bool enable)
+{
+    rx_config_t next = m_config;
+    setCustomDomainEnabled(next, enable);
+    if (m_config.custom_domain_start != next.custom_domain_start
+        || m_config.custom_domain_end != next.custom_domain_end
+        || m_config.custom_domain_n_channels != next.custom_domain_n_channels
+        || m_config.custom_domain_band != next.custom_domain_band
+        || m_config.custom_domain_enable != next.custom_domain_enable)
+    {
+        m_config.custom_domain_start = next.custom_domain_start;
+        m_config.custom_domain_end = next.custom_domain_end;
+        m_config.custom_domain_n_channels = next.custom_domain_n_channels;
+        m_config.custom_domain_band = next.custom_domain_band;
+        m_config.custom_domain_enable = next.custom_domain_enable;
+        m_modified = true;
+    }
+}
+#endif
 
 void RxConfig::ReturnLoan()
 {

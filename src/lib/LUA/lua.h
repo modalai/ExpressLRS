@@ -168,10 +168,10 @@ inline void setLuaInt8Value(struct luaItem_int8 *luaStruct, int8_t newvalue) {
     luaStruct->properties.s.value = newvalue;
 }
 inline void setLuaUint16Value(struct luaItem_int16 *luaStruct, uint16_t newvalue) {
-    luaStruct->properties.u.value = htobe16(newvalue);
+    luaStruct->properties.u.value = newvalue;
 }
 inline void setLuaInt16Value(struct luaItem_int16 *luaStruct, int16_t newvalue) {
-    luaStruct->properties.u.value = htobe16((uint16_t)newvalue);
+    luaStruct->properties.s.value = newvalue;
 }
 inline void setLuaFloatValue(struct luaItem_float *luaStruct, int32_t newvalue) {
     luaStruct->properties.value = htobe32((uint32_t)newvalue);

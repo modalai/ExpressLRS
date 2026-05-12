@@ -438,7 +438,14 @@ bool CRSFHandset::processInternalCrsfPackage(uint8_t *package)
         }
         else
         {
-            if (RecvParameterUpdate) RecvParameterUpdate(packetType, header->payload[0], header->payload[1]);
+            if (RecvParameterUpdateData)
+            {
+                RecvParameterUpdateData(packetType, header->payload[0], header->payload[1], package);
+            }
+            else if (RecvParameterUpdate)
+            {
+                RecvParameterUpdate(packetType, header->payload[0], header->payload[1]);
+            }
         }
 
         return true;

@@ -760,6 +760,7 @@ void ResetPower()
 static void ChangeRadioParams()
 {
   ModelUpdatePending = false;
+  FHSSrandomiseFHSSsequence(uidMacSeedGet());
   SetRFLinkRate(config.GetRate());
   ResetPower();
 }
