@@ -2037,6 +2037,9 @@ void RxConfig::SetCustomDomainStartMHz(uint16_t startMHz)
         m_config.custom_domain_end = next.custom_domain_end;
         m_config.custom_domain_n_channels = next.custom_domain_n_channels;
         m_config.custom_domain_band = next.custom_domain_band;
+        m_modified = true;
+    }
+}
 
 void RxConfig::SetCustomDomainEndMHz(uint16_t endMHz)
 {
