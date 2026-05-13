@@ -459,6 +459,15 @@ void ICACHE_RAM_ATTR SX127xDriver::TXnb(uint8_t * data, uint8_t size, SX12XX_Rad
 
   SetMode(SX127x_OPMODE_STANDBY, SX12XX_Radio_All);
 
+  // If TX_DONE is set but the DIO0 ISR missed it (RxTimeout held DIO0 HIGH
+  // during TX completion so no rising edge was generated), handle it now.
+  // This prevents busyTransmitting from getting permanently stuck.
+  if (GetIrqFlags(radioNumber) & SX127X_CLEAR_IRQ_FLAG_TX_DONE)
+  {
+      TXnbISR();
+  }
+  ClearIrqFlags(SX12XX_Radio_All);
+
   if (radioNumber == SX12XX_Radio_NONE)
   {
       return;
