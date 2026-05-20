@@ -212,9 +212,14 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
         if (telemetry.ShouldCallPinOverride()){
             DBGLN("Received Pin Output Override command");
 #ifdef GPIO_PIN_PWM_OUTPUTS
-            pinOverride = true;
-            pinOverrideData = telemetry.GetPinOverride();
-            ServoOut_device.event();
+            pin_output_override_t override = telemetry.GetPinOverride();
+            if (override.pin_index < GPIO_PIN_PWM_OUTPUTS_COUNT) {
+                pinOverride = true;
+                pinOverrideData = override;
+                ServoOut_device.event();
+            } else {
+                DBGLN("Pin override: invalid pin index %d, ignoring", override.pin_index);
+            }
 #endif // Servo output
         }
         if (telemetry.ShouldCallParameterRequest())
