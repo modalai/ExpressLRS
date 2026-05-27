@@ -22,7 +22,12 @@
 #if defined(TARGET_TX)
 
 #define CONFIG_TX_BUTTON_ACTION_CNT 2
+// M0139 has limited EEPROM; all models share a single config slot
+#ifdef M0139
+#define CONFIG_TX_MODEL_CNT         1
+#else
 #define CONFIG_TX_MODEL_CNT         64
+#endif
 
 typedef enum {
     HT_OFF,
