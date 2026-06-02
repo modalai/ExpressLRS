@@ -29,6 +29,7 @@ TARGET=""
 ENCRYPT_KEY=""
 FACTORY_BOOT_ENV=""
 FACTORY_BOOT_BIN=""
+FACTORY_FLASH_BASE=0x08000000
 FACTORY_APP_OFFSET=0x2400
 FACTORY_APP_MAX_SIZE=98304
 FACTORY_FLASH_SIZE=$((FACTORY_APP_OFFSET + FACTORY_APP_MAX_SIZE))
@@ -40,7 +41,7 @@ print_usage () {
     echo -e "   e) Enable encryption of firmware (pass in the key)"
     echo -e "   t) Target to build (m0184_rx, m0193_rx, m0193_tx, BETAFPV_900_RX)"
     echo -e "   v) Version of firmware being built"
-    echo -e "   --factory Build a factory image for ModalAI STM32 targets"
+    echo -e "   --factory Build a factory S-record image for ModalAI STM32 targets"
 }
 
 while [ $# -gt 0 ]; do
@@ -204,9 +205,12 @@ cp $BUILD_DIR/$FW $OUTDIR
 
 if [ "$FACTORY" -eq 1 ]; then
     APP_BIN="$BUILD_DIR/firmware.bin"
-    FACTORY_FW="${FW%.bin}-factory.bin"
+    FACTORY_FW="${FW%.bin}-factory.srec"
     FACTORY_PATH="$FACTORY_OUTDIR/$FACTORY_FW"
+    FACTORY_BIN_TMP="$BUILD_DIR/${FW%.bin}-factory.bin"
+    FACTORY_STALE_BIN="$FACTORY_OUTDIR/${FW%.bin}-factory.bin"
     APP_OFFSET_DEC=$((FACTORY_APP_OFFSET))
+    OBJCOPY=${OBJCOPY:-arm-none-eabi-objcopy}
 
     echo "Building bootloader: $FACTORY_BOOT_ENV"
     pio run -d bootloader/src -e "$FACTORY_BOOT_ENV"
@@ -232,14 +236,29 @@ if [ "$FACTORY" -eq 1 ]; then
     PADDING_SIZE=$((APP_OFFSET_DEC - BOOTLOADER_SIZE))
 
     mkdir -p "$FACTORY_OUTDIR"
+    rm -f "$FACTORY_STALE_BIN"
+
+    if ! command -v "$OBJCOPY" >/dev/null 2>&1; then
+        PIO_OBJCOPY="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-objcopy"
+        if [ -x "$PIO_OBJCOPY" ]; then
+            OBJCOPY="$PIO_OBJCOPY"
+        else
+            echo "Missing objcopy: set OBJCOPY or install arm-none-eabi-objcopy"
+            exit 1
+        fi
+    fi
+
     {
         cat "$FACTORY_BOOT_BIN"
         if [ "$PADDING_SIZE" -gt 0 ]; then
             dd if=/dev/zero bs=1 count="$PADDING_SIZE" status=none | tr '\000' '\377'
         fi
         cat "$APP_BIN"
-    } > "$FACTORY_PATH"
+    } > "$FACTORY_BIN_TMP"
 
-    echo "Factory image created: $FACTORY_PATH"
+    "$OBJCOPY" -I binary -O srec --change-addresses="$FACTORY_FLASH_BASE" "$FACTORY_BIN_TMP" "$FACTORY_PATH"
+    rm -f "$FACTORY_BIN_TMP"
+
+    echo "Factory S-record image created: $FACTORY_PATH"
     md5sum "$FACTORY_PATH"
 fi
