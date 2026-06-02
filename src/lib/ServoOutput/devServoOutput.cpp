@@ -24,6 +24,8 @@ bool pwmIsArmed = false;
 static uint32_t pwmConfigHash = 0;
 // Absolute max failsafe time if no update is received, regardless of LQ
 static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
+// Timestamp of last override command — file-scope so event() can check it
+static uint32_t lastOverrideUpdate;
 
 constexpr unsigned SERVO_FAILSAFE_MIN = 886U;
 
@@ -222,13 +224,15 @@ static void servosInitialFailsafe()
 static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
+    // overrideActive: true if an override command arrived within the failsafe window.
+    // Computed before newChannelsAvailable so it reflects the previous tick's state.
+    const bool overrideActive = lastOverrideUpdate && (now - lastOverrideUpdate < FAILSAFE_ABS_TIMEOUT_MS);
     if (newChannelsAvailable)
     {
         newChannelsAvailable = false;
-        if(!overridePWM)
-            lastUpdate = now;
-        else
-            lastUpdate = 0; // Don't let an override cause a failsafe
+        lastUpdate = now;
+        if (overridePWM)
+            lastOverrideUpdate = now;
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
@@ -269,13 +273,22 @@ static void servosUpdate(unsigned long now)
         } /* for each servo */
     }     /* if newChannelsAvailable */
 
-    // LQ goes to 0 (100 packets missed in a row)
-    // OR last update older than FAILSAFE_ABS_TIMEOUT_MS
-    // go to failsafe
-    else if (lastUpdate && ((getLq() == 0) || (now - lastUpdate > FAILSAFE_ABS_TIMEOUT_MS)))
+    // Failsafe trigger — two sources, two variables:
+    //   lastUpdate:       set by RF or override; governs the 1000ms timeout for both.
+    //   lastOverrideUpdate: set only by override; governs LQ gating (overrideActive).
+    //
+    // Scenario                          | LQ trigger       | Timeout trigger
+    // ----------------------------------|------------------|----------------------------
+    // RF only, RF lost                  | yes (fast path)  | yes (1000ms)
+    // Override only, override lost      | no (gated <1s)   | yes (1000ms)
+    // Both: RF fails, override running  | no — gated       | only if override also stops
+    // Both: override fails, RF running  | re-armed after 1s| no (RF resets timer)
+    // Both: override fails, then RF     | yes (fast path)  | yes (1000ms)
+    else if (lastUpdate && ((!overrideActive && getLq() == 0) || (now - lastUpdate > FAILSAFE_ABS_TIMEOUT_MS)))
     {
         servosFailsafe();
         lastUpdate = 0;
+        lastOverrideUpdate = 0;
     }
 }
 
@@ -453,8 +466,10 @@ static int event()
 
     if (!OPT_HAS_SERVO_OUTPUT || connectionState == disconnected)
     {
-        // Disconnected should come after failsafe on the RX,
-        // so it is safe to shut down when disconnected
+        // Keep timeout() running while override is active so the failsafe
+        // can fire if override commands stop arriving (RF never connects).
+        if (lastOverrideUpdate)
+            return DURATION_IMMEDIATELY;
         return DURATION_NEVER;
     }
     else if (connectionState == wifiUpdate)
