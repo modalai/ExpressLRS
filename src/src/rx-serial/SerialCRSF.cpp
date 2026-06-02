@@ -37,8 +37,6 @@ static void sendParamToSerial(uint8_t *data)
 
 #ifdef GPIO_PIN_PWM_OUTPUTS
 // M0139 PWM config via Serial
-extern device_t ServoOut_device;
-
 bool updatePWM = false;
 bool overridePWM = false;
 rx_pwm_config_in pwmInput = {0};
@@ -206,7 +204,7 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
 #ifdef GPIO_PIN_PWM_OUTPUTS
             updatePWM = true;
             pwmInput = telemetry.GetPwmInput();
-            ServoOut_device.event();
+            devicesTriggerEvent();
 #endif // Servo output
         }
         if (telemetry.ShouldCallOverridePWM()){
@@ -214,7 +212,7 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
 #ifdef GPIO_PIN_PWM_OUTPUTS
             overridePWM = true;
             pwmOverride = telemetry.GetPwmOverride();
-            ServoOut_device.event();
+            devicesTriggerEvent();
 #endif // Servo output
         }
         if (telemetry.ShouldCallParameterRequest())
