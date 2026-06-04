@@ -236,8 +236,8 @@ typedef enum : uint8_t {
 
 typedef enum : uint8_t {
     MAP_OFF = 0,        // no mapping - pass CRSF_TO_US
-    MAP_INTERP = 1,      // 3-point linear interpolation
-    MAP_STEP = 2       // step curve
+    MAP_STEP = 1,       // step curve (matches mapModeStepDown=1 in common.h)
+    MAP_INTERP = 2      // 3-point linear interpolation (matches mapModeLinInterp=2 in common.h)
     // etc.
 };
 
