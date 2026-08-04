@@ -4,46 +4,30 @@
 
 #if !defined(TARGET_NATIVE)
 #if defined(PLATFORM_STM32)
-    #if defined(TARGET_USE_EEPROM) && defined(USE_I2C)
-        #if !defined(TARGET_EEPROM_ADDR)
-            #define TARGET_EEPROM_ADDR 0x51
-            #warning "!! Using default EEPROM address (0x51) !!"
-        #endif
-
-        #include <Wire.h>
-        #include <extEEPROM.h>
-        extEEPROM EEPROM(kbits_2, 1, 1, TARGET_EEPROM_ADDR);
-    #else
-        #define STM32_USE_FLASH
-        #include <utility/stm32_eeprom.h>
-    #endif
+#if defined(TARGET_USE_EEPROM) && defined(USE_I2C)
+#include <Wire.h>
+#include <extEEPROM.h>
+extEEPROM EEPROM(kbits_2, 1, 1, TARGET_EEPROM_ADDR);
 #else
-    #include <EEPROM.h>
+#define STM32_USE_FLASH
+#include <utility/stm32_eeprom.h>
+#endif
+#else
+#include <EEPROM.h>
 #endif
 
 void
 ELRS_EEPROM::Begin()
 {
 #if defined(PLATFORM_STM32)
-    #if defined(STM32_USE_FLASH)
-        eeprom_buffer_fill();
-    #else // !STM32_USE_FLASH
-        // I2C initialization is the responsibility of the caller
-        // e.g. Wire.begin(GPIO_PIN_SDA, GPIO_PIN_SCL);
-        DBGLN("Initializing EEPROM");
-        /* Initialize EEPROM */
-        #if defined(TARGET_EEPROM_400K)
-            DBGLN("400K");
-            EEPROM.begin(extEEPROM::twiClock400kHz);
-        #else
-            DBGLN("100K");
-            EEPROM.begin(extEEPROM::twiClock100kHz);
-        #endif
-    #endif // STM32_USE_FLASH
-#else /* !PLATFORM_STM32 */
+#if defined(STM32_USE_FLASH)
+    eeprom_buffer_fill();
+#else
+    EEPROM.begin(extEEPROM::twiClock100kHz);
+#endif
+#else
     EEPROM.begin(RESERVED_EEPROM_SIZE);
-#endif /* PLATFORM_STM32 */
-DBGLN("EEPROM INIT");
+#endif
 }
 
 uint8_t

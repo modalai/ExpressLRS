@@ -1,5 +1,4 @@
 Import("env")
-from genericpath import exists
 import os
 from random import randint
 import sys
@@ -7,7 +6,6 @@ import hashlib
 import fnmatch
 import time
 import re
-import melodyparser
 import elrs_helpers
 
 build_flags = env.get('BUILD_FLAGS', [])
@@ -76,9 +74,6 @@ def process_build_flag(define):
             define = "-DMY_UID=" + UIDbytes
             sys.stdout.write("\u001b[32mUID bytes: " + UIDbytes + "\n")
             sys.stdout.flush()
-        if "MY_STARTUP_MELODY=" in define:
-            parsedMelody = melodyparser.parse(define.split('"')[1::2][0])
-            define = "-DMY_STARTUP_MELODY_ARR=\"" + parsedMelody + "\""
         if "HOME_WIFI_SSID=" in define:
             parts = re.search(r"(.*)=\w*\"(.*)\"$", define)
             if parts and parts.group(2):
@@ -124,6 +119,12 @@ def condense_flags():
 
 def version_to_env():
     ver = elrs_helpers.get_git_version()
+    if target_name.startswith("MODALAI_"):
+        for flag in build_flags:
+            match = re.fullmatch(r'-DLatest_Version="?([^"\s]+)"?', flag.strip())
+            if match:
+                ver['version'] = match.group(1)
+                break
     env.Append(GIT_SHA = ver['sha'], GIT_VERSION= ver['version'])
 
 def string_to_ascii(str):
@@ -135,27 +136,9 @@ def get_git_sha():
 def get_version():
     return string_to_ascii(env.get('GIT_VERSION'))
 
-def get_version_hex():
-    """Convert git version string to hex format for numeric use"""
-    version_str = env.get('GIT_VERSION')
-    if not version_str:
-        return "0x00000000"
-    
-    try:
-        # Split version string like "3.5.3.13" into parts
-        parts = version_str.split('.')[:4]  # Take first 4 parts max
-        hex_value = 0
-        
-        for i, part in enumerate(parts):
-            # Extract numeric part only (handles "3.5.3-rc1" etc)
-            numeric_part = ''.join(filter(str.isdigit, part))
-            if numeric_part:
-                num = min(int(numeric_part), 255)  # Cap at 255 for single byte
-                hex_value |= (num << (8 * (3 - i)))  # Shift left for each byte position
-        
-        return f"0x{hex_value:08x}"
-    except:
-        return "0x00000000"
+def cleanDefaultProductForTarget(target_name: str) -> None:
+    from UnifiedConfiguration import clearDefaultProductForTarget
+    clearDefaultProductForTarget(target_name)
 
 json_flags['flash-discriminator'] = randint(1,2**32-1)
 json_flags['wifi-on-interval'] = -1
@@ -166,14 +149,13 @@ version_to_env()
 build_flags.append("-DLATEST_COMMIT=" + get_git_sha())
 build_flags.append("-DLATEST_VERSION=" + get_version())
 build_flags.append("-DTARGET_NAME=" + re.sub("_VIA_.*", "", target_name))
-build_flags.append("-DMODALAI_VERSION=" + os.environ.get("MODALAI_VERSION", "0x00"))
-build_flags.append("-DMODAL_ELRS_VER=" + os.environ.get("ELRS_VER", get_version_hex()))
 condense_flags()
 
 if '-DRADIO_SX127X=1' in build_flags or '-DRADIO_LR1121=1' in build_flags:
     # disallow setting 2400s for 900
-    if fnmatch.filter(build_flags, '*-DRegulatory_Domain_ISM_2400') or \
-        fnmatch.filter(build_flags, '*-DRegulatory_Domain_EU_CE_2400'):
+    if '-DRADIO_SX127X=1' in build_flags and \
+            (fnmatch.filter(build_flags, '*-DRegulatory_Domain_ISM_2400') or
+             fnmatch.filter(build_flags, '*-DRegulatory_Domain_EU_CE_2400')):
         print_error('Regulatory_Domain 2400 not compatible with RADIO_SX127X/RADIO_LR1121')
 
     # require a domain be set for 900
@@ -204,14 +186,36 @@ if fnmatch.filter(build_flags, '*Regulatory_Domain_ISM_2400*') and \
         target_name != "NATIVE":
     build_flags = [f for f in build_flags if "Regulatory_Domain_ISM_2400" not in f]
 
+# Slim down the ESP8266 targets by not force-including float in scanf/printf
+if env.get('PIOPLATFORM', '') == 'espressif8266':
+    env.Replace(LINKFLAGS=[
+        "-Os",
+        "-nostdlib",
+        "-Wl,--no-check-sections",
+        "-Wl,-static",
+        "-Wl,--gc-sections",
+        "-Wl,-wrap,system_restart_local",
+        "-Wl,-wrap,spi_flash_read",
+        "-u", "app_entry",
+        #"-u", "_printf_float",
+        #"-u", "_scanf_float",
+        "-u", "_DebugExceptionVector",
+        "-u", "_DoubleExceptionVector",
+        "-u", "_KernelExceptionVector",
+        "-u", "_NMIExceptionVector",
+        "-u", "_UserExceptionVector"
+    ])
+
+# Remove the default product if this is a "clean" task
+if env.GetOption("clean"):
+    cleanDefaultProductForTarget(target_name)
+
 env['OPTIONS_JSON'] = json_flags
 env['BUILD_FLAGS'] = build_flags
 sys.stdout.write("\nbuild flags: %s\n\n" % build_flags)
 
 if fnmatch.filter(build_flags, '*PLATFORM_ESP32*'):
     sys.stdout.write("\u001b[32mBuilding for ESP32 Platform\n")
-elif fnmatch.filter(build_flags, '*PLATFORM_STM32*'):
-    sys.stdout.write("\u001b[32mBuilding for STM32 Platform\n")
 elif fnmatch.filter(build_flags, '*PLATFORM_ESP8266*'):
     sys.stdout.write("\u001b[32mBuilding for ESP8266/ESP8285 Platform\n")
     if fnmatch.filter(build_flags, '-DAUTO_WIFI_ON_INTERVAL*'):
@@ -220,14 +224,3 @@ elif fnmatch.filter(build_flags, '*PLATFORM_ESP8266*'):
         sys.stdout.write("\u001b[32mAUTO_WIFI_ON_INTERVAL = OFF\n")
 
 sys.stdout.flush()
-time.sleep(.5)
-
-# Set upload_protovol = 'custom' for STM32 MCUs
-#  otherwise firmware.bin is not generated
-stm = env.get('PIOPLATFORM', '') in ['ststm32']
-if stm:
-    env['UPLOAD_PROTOCOL'] = 'custom'
-    # -DFLASH_DISCRIM=xxxx can't be passed on the command line or it will every file to
-    # always be rebuilt, so put it in a header that options.cpp can include
-    print(f"#define FLASH_DISCRIM {json_flags['flash-discriminator']}",
-          file=open("include/flashdiscrim.h", "w"))

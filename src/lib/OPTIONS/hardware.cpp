@@ -1,13 +1,9 @@
-#if defined(TARGET_UNIFIED_TX) || defined(TARGET_UNIFIED_RX)
-
+#if !defined(UNIT_TEST)
+#if !defined(M0139)
 #include "options.h"
 #include "helpers.h"
 #include "logging.h"
-#if defined(PLATFORM_ESP8266)
-#include <FS.h>
-#else
-#include <SPIFFS.h>
-#endif
+#include <LittleFS.h>
 #include <ArduinoJson.h>
 
 typedef enum {
@@ -23,6 +19,7 @@ static const struct {
     const char *name;
     const datatype_t type;
 } fields[] = {
+    {HARDWARE_customised, "customised", BOOL},
     {HARDWARE_serial_rx, "serial_rx", INT},
     {HARDWARE_serial_tx, "serial_tx", INT},
     {HARDWARE_serial1_rx, "serial1_rx", INT},
@@ -33,7 +30,6 @@ static const struct {
     {HARDWARE_radio_dio0_2, "radio_dio0_2", INT},
     {HARDWARE_radio_dio1, "radio_dio1", INT},
     {HARDWARE_radio_dio1_2, "radio_dio1_2", INT},
-    {HARDWARE_radio_dio2, "radio_dio2", INT},
     {HARDWARE_radio_miso, "radio_miso", INT},
     {HARDWARE_radio_mosi, "radio_mosi", INT},
     {HARDWARE_radio_nss, "radio_nss", INT},
@@ -46,9 +42,8 @@ static const struct {
     {HARDWARE_radio_rfsw_ctrl, "radio_rfsw_ctrl", ARRAY},
     {HARDWARE_radio_rfsw_ctrl_count, "radio_rfsw_ctrl", COUNT},
     {HARDWARE_ant_ctrl, "ant_ctrl", INT},
-    {HARDWARE_ant_ctrl_compl, "ant_ctrl_compl", INT},
+    {HARDWARE_ant_group, "ant_group", INT},
     {HARDWARE_power_enable, "power_enable", INT},
-    {HARDWARE_power_apc1, "power_apc1", INT},
     {HARDWARE_power_apc2, "power_apc2", INT},
     {HARDWARE_power_rxen, "power_rxen", INT},
     {HARDWARE_power_txen, "power_txen", INT},
@@ -56,7 +51,6 @@ static const struct {
     {HARDWARE_power_txen_2, "power_txen_2", INT},
     {HARDWARE_power_lna_gain, "power_lna_gain", INT},
     {HARDWARE_power_min, "power_min", INT},
-    {HARDWARE_power_high, "power_high", INT},
     {HARDWARE_power_max, "power_max", INT},
     {HARDWARE_power_default, "power_default", INT},
     {HARDWARE_power_pdet, "power_pdet", INT},
@@ -102,6 +96,7 @@ static const struct {
     {HARDWARE_screen_sda, "screen_sda", INT},
     {HARDWARE_screen_type, "screen_type", INT},
     {HARDWARE_screen_reversed, "screen_reversed", BOOL},
+    {HARDWARE_screen_mirror, "screen_mirror", BOOL},
     {HARDWARE_screen_bl, "screen_bl", INT},
     {HARDWARE_use_backpack, "use_backpack", BOOL},
     {HARDWARE_debug_backpack_baud, "debug_backpack_baud", INT},
@@ -123,10 +118,35 @@ static const struct {
     {HARDWARE_thermal_lm75a, "thermal_lm75a", BOOL},
     {HARDWARE_pwm_outputs, "pwm_outputs", ARRAY},
     {HARDWARE_pwm_outputs_count, "pwm_outputs", COUNT},
+    {HARDWARE_pwm_out_only, "pwm_out_only", BOOL},
     {HARDWARE_vbat, "vbat", INT},
     {HARDWARE_vbat_offset, "vbat_offset", INT},
     {HARDWARE_vbat_scale, "vbat_scale", INT},
     {HARDWARE_vbat_atten, "vbat_atten", INT},
+    {HARDWARE_vbat_noreading, "vbat_noreading", INT},
+    {HARDWARE_vbat_cal_min, "vbat_cal_min", INT},
+    {HARDWARE_vbat_cal_max, "vbat_cal_max", INT},
+    {HARDWARE_vsrc1, "vsrc1", INT},
+    {HARDWARE_vsrc1_offset, "vsrc1_offset", INT},
+    {HARDWARE_vsrc1_scale, "vsrc1_scale", INT},
+    {HARDWARE_vsrc1_atten, "vsrc1_atten", INT},
+    {HARDWARE_vsrc1_noreading, "vsrc1_noreading", INT},
+    {HARDWARE_vsrc1_cal_min, "vsrc1_cal_min", INT},
+    {HARDWARE_vsrc1_cal_max, "vsrc1_cal_max", INT},
+    {HARDWARE_vsrc2, "vsrc2", INT},
+    {HARDWARE_vsrc2_offset, "vsrc2_offset", INT},
+    {HARDWARE_vsrc2_scale, "vsrc2_scale", INT},
+    {HARDWARE_vsrc2_atten, "vsrc2_atten", INT},
+    {HARDWARE_vsrc2_noreading, "vsrc2_noreading", INT},
+    {HARDWARE_vsrc2_cal_min, "vsrc2_cal_min", INT},
+    {HARDWARE_vsrc2_cal_max, "vsrc2_cal_max", INT},
+    {HARDWARE_vsrc3, "vsrc3", INT},
+    {HARDWARE_vsrc3_offset, "vsrc3_offset", INT},
+    {HARDWARE_vsrc3_scale, "vsrc3_scale", INT},
+    {HARDWARE_vsrc3_atten, "vsrc3_atten", INT},
+    {HARDWARE_vsrc3_noreading, "vsrc3_noreading", INT},
+    {HARDWARE_vsrc3_cal_min, "vsrc3_cal_min", INT},
+    {HARDWARE_vsrc3_cal_max, "vsrc3_cal_max", INT},
     {HARDWARE_vtx_amp_pwm, "vtx_amp_pwm", INT},
     {HARDWARE_vtx_amp_vpd, "vtx_amp_vpd", INT},
     {HARDWARE_vtx_amp_vref, "vtx_amp_vref", INT},
@@ -152,7 +172,7 @@ static String builtinHardwareConfig;
 
 String& getHardware()
 {
-    File file = SPIFFS.open("/hardware.json", "r");
+    File file = LittleFS.open("/hardware.json", "r");
     if (!file || file.isDirectory())
     {
         if (file)
@@ -168,22 +188,22 @@ String& getHardware()
 
 static void hardware_ClearAllFields()
 {
-    for (size_t i=0 ; i<ARRAY_SIZE(fields) ; i++) {
-        switch (fields[i].type) {
+    for (auto field : fields) {
+        switch (field.type) {
             case INT:
-                hardware[fields[i].position].int_value = -1;
+                hardware[field.position].int_value = -1;
                 break;
             case BOOL:
-                hardware[fields[i].position].bool_value = false;
+                hardware[field.position].bool_value = false;
                 break;
             case FLOAT:
-                hardware[fields[i].position].float_value = 0.0;
+                hardware[field.position].float_value = 0.0;
                 break;
             case ARRAY:
-                hardware[fields[i].position].array_value = nullptr;
+                hardware[field.position].array_value = nullptr;
                 break;
             case COUNT:
-                hardware[fields[i].position].int_value = 0;
+                hardware[field.position].int_value = 0;
                 break;
         }
     }
@@ -191,29 +211,29 @@ static void hardware_ClearAllFields()
 
 static void hardware_LoadFieldsFromDoc(JsonDocument &doc)
 {
-    for (size_t i=0 ; i<ARRAY_SIZE(fields) ; i++) {
-        if (doc.containsKey(fields[i].name)) {
-            switch (fields[i].type) {
+    for (auto field : fields) {
+        if (doc[field.name].is<JsonVariant>()) {
+            switch (field.type) {
                 case INT:
-                    hardware[fields[i].position].int_value = doc[fields[i].name];
+                    hardware[field.position].int_value = doc[field.name];
                     break;
                 case BOOL:
-                    hardware[fields[i].position].bool_value = doc[fields[i].name];
+                    hardware[field.position].bool_value = doc[field.name];
                     break;
                 case FLOAT:
-                    hardware[fields[i].position].float_value = doc[fields[i].name];
+                    hardware[field.position].float_value = doc[field.name];
                     break;
                 case ARRAY:
                     {
-                        JsonArray array = doc[fields[i].name].as<JsonArray>();
-                        hardware[fields[i].position].array_value = new int16_t[array.size()];
-                        copyArray(doc[fields[i].name], hardware[fields[i].position].array_value, array.size());
+                        JsonArray array = doc[field.name].as<JsonArray>();
+                        hardware[field.position].array_value = new int16_t[array.size()];
+                        copyArray(array, hardware[field.position].array_value, array.size());
                     }
                     break;
                 case COUNT:
                     {
-                        JsonArray array = doc[fields[i].name].as<JsonArray>();
-                        hardware[fields[i].position].int_value = array.size();
+                        JsonArray array = doc[field.name].as<JsonArray>();
+                        hardware[field.position].int_value = (int)array.size();
                     }
                     break;
             }
@@ -228,7 +248,7 @@ bool hardware_init(EspFlashStream &strmFlash)
 
     Stream *strmSrc;
     JsonDocument doc;
-    File file = SPIFFS.open("/hardware.json", "r");
+    File file = LittleFS.open("/hardware.json", "r");
     if (!file || file.isDirectory()) {
         constexpr size_t hardwareConfigOffset = ELRSOPTS_PRODUCTNAME_SIZE + ELRSOPTS_DEVICENAME_SIZE + ELRSOPTS_OPTIONS_SIZE;
         strmFlash.setPosition(hardwareConfigOffset);
@@ -256,22 +276,22 @@ bool hardware_init(EspFlashStream &strmFlash)
     return true;
 }
 
-const int hardware_pin(nameType name)
+int hardware_pin(nameType name)
 {
     return hardware[name].int_value;
 }
 
-const bool hardware_flag(nameType name)
+bool hardware_flag(nameType name)
 {
     return hardware[name].bool_value;
 }
 
-const int hardware_int(nameType name)
+int hardware_int(nameType name)
 {
     return hardware[name].int_value;
 }
 
-const float hardware_float(nameType name)
+float hardware_float(nameType name)
 {
     return hardware[name].float_value;
 }
@@ -285,5 +305,48 @@ const uint16_t* hardware_u16_array(nameType name)
 {
     return (uint16_t *)hardware[name].array_value;
 }
+#else
+#include "options.h"
 
+bool hardware_init()
+{
+    return true;
+}
+
+int hardware_pin(nameType name)
+{
+    (void)name;
+    return UNDEF_PIN;
+}
+
+bool hardware_flag(nameType name)
+{
+    (void)name;
+    return false;
+}
+
+int hardware_int(nameType name)
+{
+    (void)name;
+    return 0;
+}
+
+float hardware_float(nameType name)
+{
+    (void)name;
+    return 0.0f;
+}
+
+const int16_t* hardware_i16_array(nameType name)
+{
+    (void)name;
+    return nullptr;
+}
+
+const uint16_t* hardware_u16_array(nameType name)
+{
+    (void)name;
+    return nullptr;
+}
+#endif
 #endif

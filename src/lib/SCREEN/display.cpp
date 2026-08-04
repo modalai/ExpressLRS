@@ -54,23 +54,28 @@ const char *rate_string[] = {
 #elif defined(RADIO_LR1121)
 static const char *rate_string[] = {
     // 900
+    "K1000Full",
+    "250Hz",
+    "200Full",
     "200Hz",
-    "100 Full",
+    "100Full",
     "100Hz",
     "50Hz",
+    "25Hz",
+    "D50",
     // 2.4
+    "K1000",
+    "DK500",
+    "DK250",
     "500Hz",
-    "333 Full",
+    "333Full",
     "250Hz",
     "150Hz",
-    "100 Full",
+    "100Full",
     "50Hz",
     // Dual
     "X150Hz",
-    "X100 Full",
-    // 900
-    "250Hz",
-    "200 Full",
+    "X100Full"
 };
 #else
 static const char *rate_string[] = {
@@ -157,7 +162,7 @@ static const char *smartfan_string[] = {
 };
 
 static const char *band_string[] = {
-    "OFF",
+    "Disabled",
     "A",
     "B",
     "E",

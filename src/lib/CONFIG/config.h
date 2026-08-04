@@ -4,7 +4,10 @@
 #include "elrs_eeprom.h"
 #include "options.h"
 #include "common.h"
+#include "OTA.h"
+#if defined(CUSTOM_DOMAIN_ENABLE)
 #include "FHSS.h"
+#endif
 
 #if defined(PLATFORM_ESP32)
 #include <nvs_flash.h>
@@ -16,14 +19,27 @@
 #define TX_CONFIG_MAGIC     (0b01U << 30)
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
-#define TX_CONFIG_VERSION   9U
-#define RX_CONFIG_VERSION   14U
+#if defined(M0139)
+#define TX_CONFIG_VERSION   10U
+#define RX_CONFIG_VERSION   15U
+#else
+#define TX_CONFIG_VERSION   8U
+#define RX_CONFIG_VERSION   11U
+#endif
+
+class BindphraseConfigurable
+{
+public:
+    virtual ~BindphraseConfigurable() = default;
+
+    virtual void SetUID(uint8_t uid[UID_LEN]) = 0;
+    void SetBindPhrase(uint8_t *phrase, size_t phraseLen);
+};
 
 #if defined(TARGET_TX)
 
 #define CONFIG_TX_BUTTON_ACTION_CNT 2
-// M0139 has limited EEPROM; all models share a single config slot
-#ifdef M0139
+#if defined(M0139)
 #define CONFIG_TX_MODEL_CNT         1
 #else
 #define CONFIG_TX_MODEL_CNT         64
@@ -50,8 +66,22 @@ typedef enum {
     HT_AUX8_DN,
 } headTrackingEnable_t;
 
+typedef enum {
+    HT_START_EDGETX,
+    HT_START_AUX1,
+    HT_START_AUX2,
+    HT_START_AUX3,
+    HT_START_AUX4,
+    HT_START_AUX5,
+    HT_START_AUX6,
+    HT_START_AUX7,
+    HT_START_AUX8,
+    HT_START_AUX9,
+    HT_START_AUX10,
+} headTrackingStart_t;
+
 typedef struct {
-    uint32_t    rate:4,
+    uint32_t    rate:5,
                 tlm:4,
                 power:3,
                 switchMode:2,
@@ -61,7 +91,7 @@ typedef struct {
                 txAntenna:2,    // FUTURE: Which TX antenna to use, 0=Auto
                 ptrStartChannel:4,
                 ptrEnableChannel:5,
-                linkMode:3;
+                linkMode:2;
 } model_config_t;
 
 typedef struct {
@@ -93,9 +123,9 @@ typedef struct {
     uint8_t         vtxPower;   // 0=Do not set, else power number
     uint8_t         vtxPitmode; // Off/On/AUX1^/AUX1v/etc
     uint8_t         powerFanThreshold:4; // Power level to enable fan if present
-    // NOTE: uid must remain before model_config so it lands within the first 128 bytes
-    // of EEPROM (the physical chip capacity on M0184/M0193).
-    uint8_t         uid[UID_LEN];       // saved random UID (all-zero = use hardware-derived)
+#if defined(M0139)
+    uint8_t         uid[UID_LEN];
+#endif
     model_config_t  model_config[CONFIG_TX_MODEL_CNT];
     uint8_t         fanMode;            // some value used by thermal?
     uint8_t         motionMode:2,       // bool, but space for 2 more modes
@@ -107,21 +137,27 @@ typedef struct {
     tx_button_color_t buttonColors[2];  // FUTURE: TX RGB color / mode (sets color of TX, can be a static color or standard)
                                         // FUTURE: Model RGB color / mode (sets LED color mode on the model, but can be second TX led color too)
                                         // FUTURE: Custom button actions
-    // Custom Frequency parameters
-    uint32_t        custom_domain_start:8, // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
-                    custom_domain_end:8, // 128 = 990 MHz
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    uint32_t        custom_domain_start:8,
+                    custom_domain_end:8,
                     custom_domain_n_channels:8,
-                    custom_domain_band:1, // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port
-                    custom_domain_enable:1, // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
-                    unused:5;
+                    custom_domain_band:1,
+                    custom_domain_enable:1,
+                    custom_domain_unused:6;
+#endif
 } tx_config_t;
 
-class TxConfig
+#if defined(M0139)
+static_assert(sizeof(tx_config_t) <= 128, "M0139 TX config exceeds the EEPROM layout limit");
+#endif
+
+class TxConfig : public BindphraseConfigurable
 {
 public:
     TxConfig();
+    ~TxConfig() override = default;
     void Load();
-    void Commit();
+    uint32_t Commit();
 
     // Getters
     uint8_t GetRate() const { return m_model->rate; }
@@ -133,7 +169,7 @@ public:
     uint8_t GetAntennaMode() const { return m_model->txAntenna; }
     uint8_t GetLinkMode() const { return m_model->linkMode; }
     bool GetModelMatch() const { return m_model->modelMatch; }
-    bool     IsModified() const { return m_modified; }
+    bool     IsModified() const { return m_modified != 0; }
     uint8_t  GetVtxBand() const { return m_config.vtxBand; }
     uint8_t  GetVtxChannel() const { return m_config.vtxChannel; }
     uint8_t  GetVtxPower() const { return m_config.vtxPower; }
@@ -150,7 +186,9 @@ public:
     model_config_t const &GetModelConfig(uint8_t model) const { return m_config.model_config[model]; }
     uint8_t GetPTRStartChannel() const { return m_model->ptrStartChannel; }
     uint8_t GetPTREnableChannel() const { return m_model->ptrEnableChannel; }
-    const uint8_t* GetUID() const { return m_config.uid; }
+#if defined(M0139)
+    const uint8_t *GetUID() const { return m_config.uid; }
+#endif
 #if defined(CUSTOM_DOMAIN_ENABLE)
     fhss_config_t GetCustomDomain() const;
     uint16_t GetCustomDomainStartMHz() const;
@@ -186,14 +224,15 @@ public:
     void SetBackpackTlmMode(uint8_t mode);
     void SetPTRStartChannel(uint8_t ptrStartChannel);
     void SetPTREnableChannel(uint8_t ptrEnableChannel);
-    void SetUID(const uint8_t* uid);
+    void SetUID(uint8_t uid[UID_LEN]) override;
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
+    void SetCustomDomain(const fhss_config_t *newCustomDomain, bool enable);
     void SetCustomDomainStartMHz(uint16_t startMHz);
     void SetCustomDomainEndMHz(uint16_t endMHz);
     void SetCustomDomainChannels(uint8_t channels);
     void SetCustomDomainEnabled(bool enable);
 #endif
+
     // State setters
     bool SetModelId(uint8_t modelId);
 
@@ -202,12 +241,11 @@ private:
     void UpgradeEepromV5ToV6();
     void UpgradeEepromV6ToV7();
     void UpgradeEepromV7ToV8();
-    void UpgradeEepromV8ToV9();
 #endif
 
     tx_config_t m_config;
     ELRS_EEPROM *m_eeprom;
-    uint8_t     m_modified;
+    uint32_t     m_modified;
     model_config_t *m_model;
     uint8_t     m_modelId;
 #if defined(PLATFORM_ESP32)
@@ -222,7 +260,7 @@ extern TxConfig config;
 ///////////////////////////////////////////////////
 
 #if defined(TARGET_RX)
-#if defined(GPIO_PIN_PWM_OUTPUTS_COUNT) && !defined(TARGET_UNIFIED_RX)
+#if defined(M0139)
 constexpr uint8_t PWM_MAX_CHANNELS = GPIO_PIN_PWM_OUTPUTS_COUNT;
 #else
 constexpr uint8_t PWM_MAX_CHANNELS = 16;
@@ -232,59 +270,47 @@ typedef enum : uint8_t {
     BINDSTORAGE_PERSISTENT = 0,
     BINDSTORAGE_VOLATILE = 1,
     BINDSTORAGE_RETURNABLE = 2,
+    BINDSTORAGE_ADMINISTERED = 3,
 } rx_config_bindstorage_t;
 
-typedef enum : uint8_t {
-    MAP_OFF = 0,        // no mapping - pass CRSF_TO_US
-    MAP_STEP = 1,       // step curve (matches mapModeStepDown=1 in common.h)
-    MAP_INTERP = 2      // 3-point linear interpolation (matches mapModeLinInterp=2 in common.h)
-    // etc.
-};
-
-typedef struct __attribute__((packed)) {
-    uint8_t pinIndex;
-    uint16_t failsafe;
-    uint8_t inputChannel;
-    uint8_t inverted;     // invert channel output
-    uint8_t mode;         // Output mode (eServoOutputMode)
-    uint8_t narrow;       // Narrow output mode (half pulse width)
-    uint8_t failsafeMode; // failsafe output mode (eServoOutputFailsafeMode)
-    uint8_t mapMode;      // uses the mapping values to 
-    uint8_t unused;      // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
-
-    uint16_t mapInVal1; // input value 1 (All these values are right shifted one bit to save space)
-    uint16_t mapInVal2; // input value 1 (Input values should be CRSF)
-    uint16_t mapInVal3; // input value 1
-    uint16_t mapOutVal1; // output value 1 (Output values should be us)
-    uint16_t mapOutVal2; // output value 1
-    uint16_t mapOutVal3; // output value 1
-
-} rx_pwm_config_in;
-
+#if defined(M0139)
 typedef union {
     struct __attribute__((packed)) {
-        uint32_t  failsafe:11,    // us output during failsafe +800 (e.g. 512 here would be 1500us)
-                  inputChannel:4, // 0-based input channel
-                  inverted:1,     // invert channel output
-                  mode:4,         // Output mode (eServoOutputMode)
-                  narrow:1,       // Narrow output mode (half pulse width)
-                  failsafeMode:2, // failsafe output mode (eServoOutputFailsafeMode)
-                  mapMode:2,      // uses the mapping values to
-                  requiresArm:1,  // requires arm switch to output signal
-                  unused:6;       // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
-
-        uint64_t  mapInVal1:10,   // input value 1 (All these values are right shifted one bit to save space)
-                  mapInVal2:10,   // input value 1 (Input values should be CRSF)
-                  mapInVal3:10,   // input value 1
-                  mapOutVal1:11,  // output value 1 (Output values should be us)
-                  mapOutVal2:11,  // output value 1
-                  mapOutVal3:11,  // output value 1
-                  extra:1;
+        uint32_t failsafe:11,
+                 inputChannel:4,
+                 inverted:1,
+                 mode:4,
+                 stretched:1,
+                 narrow:1,
+                 failsafeMode:2,
+                 mapMode:2,
+                 requiresArm:1,
+                 unused:5;
+        uint64_t mapInVal1:10,
+                 mapInVal2:10,
+                 mapInVal3:10,
+                 mapOutVal1:11,
+                 mapOutVal2:11,
+                 mapOutVal3:11,
+                 extra:1;
     } val;
-    struct {
-        uint32_t raw[3];
-    } raw;
+    uint32_t raw[3];
 } rx_config_pwm_t;
+#else
+typedef union {
+    struct {
+        uint32_t failsafe:11,    // us output during failsafe +476 (e.g. 1024 here would be 1500us)
+                 inputChannel:4, // 0-based input channel
+                 inverted:1,     // invert channel output
+                 mode:4,         // Output mode (eServoOutputMode)
+                 stretched:1,    // expand the channel input to 500us - 2500us
+                 narrow:1,       // Narrow output mode (half pulse width)
+                 failsafeMode:2, // failsafe output mode (eServoOutputFailsafeMode)
+                 unused:8;       // FUTURE: When someone complains "everyone" uses inverted polarity PWM or something :/
+    } val;
+    uint32_t raw;
+} rx_config_pwm_t;
+#endif
 
 typedef struct __attribute__((packed)) {
     uint32_t    version;
@@ -300,38 +326,48 @@ typedef struct __attribute__((packed)) {
     uint8_t     bindStorage:2,     // rx_config_bindstorage_t
                 power:4,
                 antennaMode:2;      // 0=0, 1=1, 2=Diversity
-    uint8_t     powerOnCounter:3,
+    uint8_t     powerOnCounter:2,
                 forceTlmOff:1,
-                rateInitialIdx:4;   // Rate to start rateCycling at on boot
+                rateInitialIdx:5;   // Rate to start rateCycling at on boot
     uint8_t     modelId;
     uint8_t     serialProtocol:4,
                 failsafeMode:2,
-                unused:2;
-    // NOTE: teamrace and sysid fields must remain before pwmChannels so they land
-    // within the first 128 bytes of EEPROM (the physical chip capacity on M0184).
+                antennaGroup:1,
+                unused:1;
+#if !defined(M0139)
+    rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
+#endif
     uint8_t     teamraceChannel:4,
                 teamracePosition:3,
                 teamracePitMode:1;  // FUTURE: Enable pit mode when disabling model
     uint8_t     targetSysId;
     uint8_t     sourceSysId;
-    // Custom Frequency parameters
-    uint32_t    custom_domain_start:8, // frequency = band_start + custom_domain_start (MHz), e.g. for SX1276 0 = 862 MHz
-                custom_domain_end:8, // 128 = 990 MHz
+#if defined(CUSTOM_DOMAIN_ENABLE)
+    uint32_t    custom_domain_start:8,
+                custom_domain_end:8,
                 custom_domain_n_channels:8,
-                custom_domain_band:2, // 0 (default): SX1276 862-1020 output port, 1: SX1276 410-525 output port, 2: 137-175
-                custom_domain_enable:1, // 0 (default): Use configured band, 1: use band defined by {custom_domain_start, custom_domain_end}
-                custom_domain_unused:5;
-    uint8_t     reserved1;          // padding to keep pwmChannels 4-byte aligned
+                custom_domain_band:1,
+                custom_domain_enable:1,
+                custom_domain_unused:6;
+#endif
+#if defined(M0139)
+    uint8_t     reserved1;
     rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
+#endif
 } rx_config_t;
 
-class RxConfig
+#if defined(M0139)
+static_assert(sizeof(rx_config_t) <= 128, "M0139 RX config exceeds the EEPROM layout limit");
+#endif
+
+class RxConfig : public BindphraseConfigurable
 {
 public:
     RxConfig();
+    ~RxConfig() override = default;
 
     void Load();
-    void Commit();
+    uint32_t Commit();
 
     // Getters
     bool     GetIsBound() const;
@@ -344,10 +380,9 @@ public:
     uint8_t  GetModelId() const { return m_config.modelId; }
     uint8_t GetPower() const { return m_config.power; }
     uint8_t GetAntennaMode() const { return m_config.antennaMode; }
-    bool     IsModified() const { return m_modified; }
-    #if defined(GPIO_PIN_PWM_OUTPUTS)
+    uint8_t GetAntennaGroup() const { return m_config.antennaGroup; }
+    bool     IsModified() const { return m_modified != 0; }
     const rx_config_pwm_t *GetPwmChannel(uint8_t ch) const { return &m_config.pwmChannels[ch]; }
-    #endif
     bool GetForceTlmOff() const { return m_config.forceTlmOff; }
     uint8_t GetRateInitialIdx() const { return m_config.rateInitialIdx; }
     eSerialProtocol GetSerialProtocol() const { return (eSerialProtocol)m_config.serialProtocol; }
@@ -370,17 +405,20 @@ public:
 #endif
 
     // Setters
-    void SetUID(uint8_t* uid);
+    void SetUID(uint8_t uid[UID_LEN]) override;
     void SetPowerOnCounter(uint8_t powerOnCounter);
     void SetModelId(uint8_t modelId);
     void SetPower(uint8_t power);
     void SetAntennaMode(uint8_t antennaMode);
+    void SetAntennaGroup(uint8_t antennaGroup);
     void SetDefaults(bool commit);
     void SetStorageProvider(ELRS_EEPROM *eeprom);
-    #if defined(GPIO_PIN_PWM_OUTPUTS)
-    void SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, bool narrow);
-    void SetPwmChannelRaw(uint8_t ch, uint32_t *raw);
-    #endif
+    void SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, uint8_t stretched);
+#if defined(M0139)
+    void SetPwmChannelRaw(uint8_t ch, const uint32_t raw[3]);
+#else
+    void SetPwmChannelRaw(uint8_t ch, uint32_t raw);
+#endif
     void SetForceTlmOff(bool forceTlmOff);
     void SetRateInitialIdx(uint8_t rateInitialIdx);
     void SetSerialProtocol(eSerialProtocol serialProtocol);
@@ -395,7 +433,7 @@ public:
     void SetBindStorage(rx_config_bindstorage_t value);
     void ReturnLoan();
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    void SetCustomDomain(const fhss_config_t * new_custom_domain, bool enable);
+    void SetCustomDomain(const fhss_config_t *newCustomDomain, bool enable);
     void SetCustomDomainStartMHz(uint16_t startMHz);
     void SetCustomDomainEndMHz(uint16_t endMHz);
     void SetCustomDomainChannels(uint8_t channels);
@@ -408,14 +446,12 @@ private:
     void UpgradeEepromV4();
     void UpgradeEepromV5();
     void UpgradeEepromV6();
-    void UpgradeEepromV7V8();
-    void UpgradeEepromV9();
-    void UpgradeEepromV11();
-    void UpgradeEepromV13ToV14();
+    void UpgradeEepromV7V8(uint8_t ver);
+    void UpgradeEepromV9V10(uint8_t ver);
 
     rx_config_t m_config;
     ELRS_EEPROM *m_eeprom;
-    bool        m_modified;
+    uint32_t    m_modified;
 };
 
 extern RxConfig config;

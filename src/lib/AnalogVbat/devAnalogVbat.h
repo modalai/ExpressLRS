@@ -1,10 +1,13 @@
 #pragma once
 
+#if defined(TARGET_RX)
+
 #include "common.h"
 #include "device.h"
 
-#if defined(USE_ANALOG_VBAT)
 void Vbat_enableSlowUpdate(bool enable);
+void Vbat_setCalibrationActive(bool active);
 
 extern device_t AnalogVbat_device;
+
 #endif

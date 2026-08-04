@@ -4,16 +4,12 @@
 
 #if defined(TARGET_TX) && defined(PLATFORM_ESP32)
 
+#include "handset.h"
+#include "crsf_protocol.h"
+#include "hwTimer.h"
+#include "options.h"
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include "common.h"
-#include "CRSF.h"
-#include "handset.h"
-#include "POWERMGNT.h"
-#include "hwTimer.h"
-#include "logging.h"
-#include "options.h"
-
 
 #if defined(RADIO_SX127X)
 extern SX127xDriver Radio;
@@ -139,8 +135,8 @@ void WifiJoystick::UpdateValues()
     for (uint8_t i = 0; i < channelCount; i++)
     {
         uint16_t channel = htole16(map(
-            constrain(ChannelData[i], CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX),
-            CRSF_CHANNEL_VALUE_MIN, CRSF_CHANNEL_VALUE_MAX, 0, 0x7fff));
+            constrain(ChannelData[i], CRSF_CHANNEL_VALUE_STD_MIN, CRSF_CHANNEL_VALUE_STD_MAX),
+                      CRSF_CHANNEL_VALUE_STD_MIN, CRSF_CHANNEL_VALUE_STD_MAX, 0, 0x7fff));
         udp->write((uint8_t*)&channel, 2);
     }
 

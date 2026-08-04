@@ -1,47 +1,49 @@
 #include "rxtx_common.h"
 
 #include "CRSFHandset.h"
+#include "CRSFParameters.h"
 #include "dynpower.h"
-#include "lua.h"
 #include "msp.h"
 #include "msptypes.h"
-#include "telemetry_protocol.h"
 #include "stubborn_receiver.h"
 #include "stubborn_sender.h"
 
 #include "devHandset.h"
+#include "devADC.h"
 #include "devLED.h"
-#include "devScreen.h"
-#include "devBuzzer.h"
-#include "devBLE.h"
-#include "devLUA.h"
+#include "devTXLUA.h"
 #include "devWIFI.h"
 #include "devButton.h"
 #include "devVTX.h"
+#if defined(PLATFORM_ESP32)
+#include "devScreen.h"
+#include "devBLE.h"
 #include "devGsensor.h"
 #include "devThermal.h"
 #include "devPDET.h"
 #include "devBackpack.h"
-
-#include "MAVLink.h"
-
-#if defined(PLATFORM_ESP32_S3)
-#include "USB.h"
-#define USBSerial Serial
+#else
+// Fake functions for 8285
+void checkBackpackUpdate() {}
+void sendCRSFTelemetryToBackpack(uint8_t *) {}
+void sendMAVLinkTelemetryToBackpack(uint8_t *) {}
 #endif
+
+#include "CRSFParser.h"
+#include "CRSFRouter.h"
+#include "MAVLink.h"
+#include "TXModuleEndpoint.h"
+#include "TXOTAConnector.h"
+#include "TXUSBConnector.h"
 
 #if defined(PLATFORM_ESP8266)
 #include <user_interface.h>
 #endif
 
-//// CONSTANTS ////
-#define MSP_PACKET_SEND_INTERVAL 10LU
-
 /// define some libs to use ///
 MSP msp;
 ELRS_EEPROM eeprom;
 TxConfig config;
-Stream *TxBackpack;
 Stream *TxUSB;
 
 // Variables / constants for Airport //
@@ -53,12 +55,9 @@ FIFO<UART_INPUT_BUF_LEN> uartInputBuffer;
 
 uint8_t mavlinkSSBuffer[CRSF_MAX_PACKET_LEN]; // Buffer for current stubbon sender packet (mavlink only)
 
-#if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
-unsigned long rebootTime = 0;
 extern bool webserverPreventAutoStart;
-#endif
 //// MSP Data Handling ///////
-bool NextPacketIsMspData = false;  // if true the next packet will contain the msp data
+bool NextPacketIsDataUl = false;  // if true the next packet will contain the uplink data (instead of channels)
 char backpackVersion[32] = "";
 
 ////////////SYNC PACKET/////////
@@ -69,15 +68,15 @@ volatile uint8_t syncSpamCounter = 0;
 volatile uint8_t syncSpamCounterAfterRateChange = 0;
 uint32_t rfModeLastChangedMS = 0;
 uint32_t SyncPacketLastSent = 0;
+static enum { stbIdle, stbRequested, stbBoosting } syncTelemBoostState = stbIdle;
 ////////////////////////////////////////////////
 
-volatile uint32_t LastTLMpacketRecvMillis = 0;
-uint32_t TLMpacketReported = 0;
+static uint32_t LastTLMpacketRecv_Ms = 0;
+static uint32_t LinkStatsLastReported_Ms = 0;
+static uint32_t RxDisconnected_Ms = 0;
 static bool commitInProgress = false;
-bool fhssLocked = false;
-bool fhssLockPending = false;
 
-LQCALC<25> LQCalc;
+LQCALC<100> LqTQly;
 
 volatile bool busyTransmitting;
 static volatile bool ModelUpdatePending;
@@ -87,59 +86,44 @@ uint8_t MSPDataPackage[5];
 static uint8_t BindingSendCount;
 bool RxWiFiReadyToSend = false;
 
-bool headTrackingEnabled = false;
-#if !defined(CRITICAL_FLASH)
-static uint16_t ptrChannelData[3] = {CRSF_CHANNEL_VALUE_MID, CRSF_CHANNEL_VALUE_MID, CRSF_CHANNEL_VALUE_MID};
-static uint32_t lastPTRValidTimeMs;
-#endif
-
 static TxTlmRcvPhase_e TelemetryRcvPhase = ttrpTransmitting;
-StubbornReceiver TelemetryReceiver;
-StubbornSender MspSender;
+StubbornReceiver DataDlReceiver;
+StubbornSender DataUlSender;
 uint8_t CRSFinBuffer[CRSF_MAX_PACKET_LEN+1];
+
+CRSFRouter crsfRouter;
+TXModuleEndpoint crsfTransmitter;
+TXOTAConnector otaConnector;
+TXUSBConnector usbConnector;
+CRSFParser crsfParser;
 
 device_affinity_t ui_devices[] = {
   {&Handset_device, 1},
-#ifdef HAS_LED
   {&LED_device, 0},
-#endif
-#ifdef HAS_RGB
   {&RGB_device, 0},
-#endif
-  {&LUA_device, 1},
-#if defined(USE_TX_BACKPACK)
-  {&Backpack_device, 0},
-#endif
-#ifdef HAS_BLE
-  {&BLE_device, 0},
-#endif
-#ifdef HAS_BUZZER
-  {&Buzzer_device, 0},
-#endif
-#ifdef HAS_WIFI
+  {&TXLUA_device, 1},
+  {&ADC_device, 1},
   {&WIFI_device, 0},
-#endif
-#ifdef HAS_BUTTON
   {&Button_device, 0},
-#endif
-#ifdef HAS_SCREEN
+#if defined(PLATFORM_ESP32)
+  {&Backpack_device, 0},
+  {&BLE_device, 0},
+#if !defined(PLATFORM_ESP32_C3)
   {&Screen_device, 0},
-#endif
-#ifdef HAS_GSENSOR
   {&Gsensor_device, 0},
-#endif
-#if defined(HAS_THERMAL) || defined(HAS_FAN)
   {&Thermal_device, 0},
-#endif
-#if defined(GPIO_PIN_PA_PDET)
   {&PDET_device, 0},
+#endif
 #endif
   {&VTX_device, 0}
 };
 
-#if defined(GPIO_PIN_ANT_CTRL)
-    static bool diversityAntennaState = LOW;
-#endif
+static bool diversityAntennaState = LOW;
+
+static bool inGeminiMode()
+{
+    return isDualRadio() && config.GetAntennaMode() == TX_RADIO_MODE_GEMINI;
+}
 
 void switchDiversityAntennas()
 {
@@ -147,10 +131,6 @@ void switchDiversityAntennas()
   {
     diversityAntennaState = !diversityAntennaState;
     digitalWrite(GPIO_PIN_ANT_CTRL, diversityAntennaState);
-  }
-  if (GPIO_PIN_ANT_CTRL_COMPL != UNDEF_PIN)
-  {
-    digitalWrite(GPIO_PIN_ANT_CTRL_COMPL, !diversityAntennaState);
   }
 }
 
@@ -162,25 +142,87 @@ void ICACHE_RAM_ATTR LinkStatsFromOta(OTA_LinkStats_s * const ls)
   // Antenna is the high bit in the RSSI_1 value
   // RSSI received is signed, inverted polarity (positive value = -dBm)
   // OpenTX's value is signed and will display +dBm and -dBm properly
-  CRSF::LinkStatistics.uplink_RSSI_1 = -(ls->uplink_RSSI_1);
-  CRSF::LinkStatistics.uplink_RSSI_2 = -(ls->uplink_RSSI_2);
-  CRSF::LinkStatistics.uplink_Link_quality = ls->lq;
+  linkStats.uplink_RSSI_1 = -(ls->uplink_RSSI_1);
+  linkStats.uplink_RSSI_2 = -(ls->uplink_RSSI_2);
+  linkStats.uplink_Link_quality = ls->lq;
 #if defined(DEBUG_FREQ_CORRECTION)
   // Don't descale the FreqCorrection value being send in SNR
-  CRSF::LinkStatistics.uplink_SNR = snrScaled;
+  linkStats.uplink_SNR = snrScaled;
 #else
-  CRSF::LinkStatistics.uplink_SNR = SNR_DESCALE(snrScaled);
+  linkStats.uplink_SNR = SNR_DESCALE(snrScaled);
 #endif
-  CRSF::LinkStatistics.active_antenna = ls->antenna;
+  linkStats.active_antenna = ls->antenna;
   connectionHasModelMatch = ls->modelMatch;
   // -- downlink_SNR / downlink_RSSI is updated for any packet received, not just Linkstats
   // -- uplink_TX_Power is updated when sending to the handset, so it updates when missing telemetry
   // -- rf_mode is updated when we change rates
   // -- downlink_Link_quality is updated before the LQ period is incremented
-  MspSender.ConfirmCurrentPayload(ls->mspConfirm);
+
+  // The Rx only has a single radio.  Force the Tx out of Gemini mode.
+  if (inGeminiMode() && !ls->trueDiversityAvailable)
+  {
+      config.SetAntennaMode(TX_RADIO_MODE_SWITCH);
+  }
 }
 
-bool ICACHE_RAM_ATTR ProcessTLMpacket(SX12xxDriverCommon::rx_status const status)
+/***
+ * @brief Receive downlink data from payload buffers in OTA_Packet_s structures and merge Gemini payload buffers
+ * @param pi1 packageIndex from Radio.RXdataBuffer
+ * @param pi2 packageIndex from Radio.RXdataBufferSecond (not used if not Gemini)
+ * @param data1 pointer to payload from Radio.RXdataBuffer
+ * @param data2 pointer to payload from Radio.RXdataBufferSecond (not used if not Gemini)
+ * @param dataLen sizeof payload data in both data1 and data2
+ * @param stubbornAck StubbornSender ack bit from either buffer (should be same)
+ */
+void ICACHE_RAM_ATTR ProcessOtaDataDl(uint8_t pi1, uint8_t pi2, uint8_t *data1, uint8_t *data2, size_t dataLen, bool stubbornAck)
+{
+  static uint8_t packageIndexRadio1 = 0xFF;
+  static uint8_t packageIndexRadio2 = 0xFF;
+  constexpr size_t geminiSpanBufferSize = 2 * ELRS8_DATA_DL_BYTES_PER_CALL; // 2 * whatever the largest payload will be
+  static uint8_t geminiSpanBuffer[geminiSpanBufferSize] = {0};
+
+  // Gemini downlink data transfer uses both radios to double to downlink data instead of being redundant copies
+  // Build the "span" buffer from the two downlink packet buffers as the two halves come in
+  if (inGeminiMode())
+  {
+      if (Radio.GetProcessingPacketRadio() == SX12XX_Radio_1)
+      {
+          packageIndexRadio1 = pi1;
+          memcpy(geminiSpanBuffer, data1, dataLen);
+      }
+      else
+      {
+          packageIndexRadio2 = pi1;
+          memcpy(&geminiSpanBuffer[dataLen], data1, dataLen);
+      }
+
+      if (Radio.GetProcessingPacketRadio() == SX12XX_Radio_1 && Radio.hasSecondRadioGotData)
+      {
+          packageIndexRadio2 = pi2;
+          memcpy(&geminiSpanBuffer[dataLen], data2, dataLen);
+      }
+      else if (Radio.GetProcessingPacketRadio() == SX12XX_Radio_2 && Radio.hasSecondRadioGotData)
+      {
+          packageIndexRadio1 = pi2;
+          memcpy(geminiSpanBuffer, data2, dataLen);
+      }
+
+      if (packageIndexRadio1 == packageIndexRadio2 && packageIndexRadio1 != 0xFF)
+      {
+          DataUlSender.ConfirmCurrentPayload(stubbornAck);
+          DataDlReceiver.ReceiveData(packageIndexRadio1, geminiSpanBuffer, 2 * dataLen);
+          packageIndexRadio1 = 0xFF;
+          packageIndexRadio2 = 0xFF;
+      }
+  }
+  else
+  {
+      DataUlSender.ConfirmCurrentPayload(stubbornAck);
+      DataDlReceiver.ReceiveData(pi1, data1, dataLen);
+  }
+}
+
+static bool ICACHE_RAM_ATTR ProcessDownlinkPacket(SX12xxDriverCommon::rx_status const status)
 {
   if (status != SX12xxDriverCommon::SX12XX_RX_OK)
   {
@@ -189,69 +231,101 @@ bool ICACHE_RAM_ATTR ProcessTLMpacket(SX12xxDriverCommon::rx_status const status
   }
 
   OTA_Packet_s * const otaPktPtr = (OTA_Packet_s * const)Radio.RXdataBuffer;
+  OTA_Packet_s * const otaPktPtrSecond = (OTA_Packet_s * const)Radio.RXdataBufferSecond;
+
   if (!OtaValidatePacketCrc(otaPktPtr))
   {
     DBGLN("TLM crc error");
     return false;
   }
 
-  if (otaPktPtr->std.type != PACKET_TYPE_TLM)
+  LastTLMpacketRecv_Ms = millis();
+  LqTQly.add();
+
+  Radio.CheckForSecondPacket();
+  if (Radio.hasSecondRadioGotData)
   {
-    DBGLN("TLM type error %d", otaPktPtr->std.type);
-    return false;
+    if (!OtaValidatePacketCrc(otaPktPtrSecond))
+    {
+      Radio.hasSecondRadioGotData = false;
+    }
   }
 
-  LastTLMpacketRecvMillis = millis();
-  LQCalc.add();
-
   Radio.GetLastPacketStats();
-  CRSF::LinkStatistics.downlink_SNR = SNR_DESCALE(Radio.LastPacketSNRRaw);
-  CRSF::LinkStatistics.downlink_RSSI_1 = Radio.LastPacketRSSI;
-  CRSF::LinkStatistics.downlink_RSSI_2 = Radio.LastPacketRSSI2;
+  linkStats.downlink_SNR = SNR_DESCALE(Radio.LastPacketSNRRaw);
+  linkStats.downlink_RSSI_1 = Radio.LastPacketRSSI;
+  linkStats.downlink_RSSI_2 = Radio.LastPacketRSSI2;
 
   // Full res mode
   if (OtaIsFullRes)
   {
     OTA_Packet8_s * const ota8 = (OTA_Packet8_s * const)otaPktPtr;
-    uint8_t *telemPtr;
-    uint8_t dataLen;
-    if (ota8->tlm_dl.containsLinkStats)
+    OTA_Packet8_s * const ota8Second = (OTA_Packet8_s * const)otaPktPtrSecond;
+
+    switch (otaPktPtr->std.type)
     {
-      LinkStatsFromOta(&ota8->tlm_dl.ul_link_stats.stats);
-      telemPtr = ota8->tlm_dl.ul_link_stats.payload;
-      dataLen = sizeof(ota8->tlm_dl.ul_link_stats.payload);
+      case PACKET_TYPE_LINKSTATS:
+        LinkStatsFromOta(&ota8->data_dl.ul_link_stats.stats);
+
+        ProcessOtaDataDl(
+          ota8->data_dl.packageIndex, ota8Second->data_dl.packageIndex,
+          ota8->data_dl.ul_link_stats.payload,
+          ota8Second->data_dl.ul_link_stats.payload,
+          sizeof(ota8->data_dl.ul_link_stats.payload),
+          ota8->data_dl.stubbornAck
+        );
+        break;
+
+      case PACKET_TYPE_DATA:
+        if (firmwareOptions.is_airport)
+        {
+          OtaUnpackAirportData(otaPktPtr, &apOutputBuffer);
+        }
+        else
+        {
+          ProcessOtaDataDl(
+            ota8->data_dl.packageIndex, ota8Second->data_dl.packageIndex,
+            ota8->data_dl.payload,
+            ota8Second->data_dl.payload,
+            sizeof(ota8->data_dl.payload),
+            ota8->data_dl.stubbornAck
+          );
+        }
+        break;
     }
-    else
-    {
-      if (firmwareOptions.is_airport)
-      {
-        OtaUnpackAirportData(otaPktPtr, &apOutputBuffer);
-        return true;
-      }
-      telemPtr = ota8->tlm_dl.payload;
-      dataLen = sizeof(ota8->tlm_dl.payload);
-    }
-    //DBGLN("pi=%u len=%u", ota8->tlm_dl.packageIndex, dataLen);
-    TelemetryReceiver.ReceiveData(ota8->tlm_dl.packageIndex & ELRS8_TELEMETRY_MAX_PACKAGES, telemPtr, dataLen);
   }
   // Std res mode
   else
   {
-    switch (otaPktPtr->std.tlm_dl.type)
+    switch (otaPktPtr->std.type)
     {
-      case ELRS_TELEMETRY_TYPE_LINK:
-        LinkStatsFromOta(&otaPktPtr->std.tlm_dl.ul_link_stats.stats);
+      case PACKET_TYPE_LINKSTATS:
+        LinkStatsFromOta(&otaPktPtr->std.data_dl.ul_link_stats.stats);
+
+        ProcessOtaDataDl(
+          otaPktPtr->std.data_dl.packageIndex, otaPktPtrSecond->std.data_dl.packageIndex,
+          otaPktPtr->std.data_dl.ul_link_stats.payload,
+          otaPktPtrSecond->std.data_dl.ul_link_stats.payload,
+          sizeof(otaPktPtr->std.data_dl.ul_link_stats.payload),
+          otaPktPtr->std.data_dl.stubbornAck
+        );
         break;
 
-      case ELRS_TELEMETRY_TYPE_DATA:
+      case PACKET_TYPE_DATA:
         if (firmwareOptions.is_airport)
         {
           OtaUnpackAirportData(otaPktPtr, &apOutputBuffer);
-          return true;
         }
-        TelemetryReceiver.ReceiveData(otaPktPtr->std.tlm_dl.packageIndex & ELRS4_TELEMETRY_MAX_PACKAGES,
-          otaPktPtr->std.tlm_dl.payload,
-          sizeof(otaPktPtr->std.tlm_dl.payload));
+        else
+        {
+          ProcessOtaDataDl(
+            otaPktPtr->std.data_dl.packageIndex, otaPktPtrSecond->std.data_dl.packageIndex,
+            otaPktPtr->std.data_dl.payload,
+            otaPktPtrSecond->std.data_dl.payload,
+            sizeof(otaPktPtr->std.data_dl.payload),
+            otaPktPtr->std.data_dl.stubbornAck
+          );
+        }
         break;
     }
   }
@@ -266,15 +340,21 @@ expresslrs_tlm_ratio_e ICACHE_RAM_ATTR UpdateTlmRatioEffective()
   expresslrs_tlm_ratio_e retVal = ExpressLRS_currAirRate_Modparams->TLMinterval;
   bool updateTelemDenom = true;
 
-  // TLM ratio is boosted for one sync cycle when the MspSender goes active
-  if (MspSender.IsActive())
+  // TLM ratio is boosted until there is one complete sync cycle with no BoostRequest
+  if (syncTelemBoostState == stbBoosting)
   {
+    syncTelemBoostState = stbIdle;
+  }
+
+  if (syncTelemBoostState == stbRequested)
+  {
+    syncTelemBoostState = stbBoosting;
     retVal = TLM_RATIO_1_2;
   }
   // If Armed, telemetry is disabled, otherwise use STD
   else if (ratioConfigured == TLM_RATIO_DISARMED)
   {
-    if (handset->IsArmed())
+    if (isArmed)
     {
       retVal = TLM_RATIO_NO_TLM;
       // Avoid updating ExpressLRS_currTlmDenom until connectionState == disconnected
@@ -292,7 +372,7 @@ expresslrs_tlm_ratio_e ICACHE_RAM_ATTR UpdateTlmRatioEffective()
     uint8_t newTlmDenom = TLMratioEnumToValue(retVal);
     // Delay going into disconnected state when the TLM ratio increases
     if (connectionState == connected && ExpressLRS_currTlmDenom > newTlmDenom)
-      LastTLMpacketRecvMillis = SyncPacketLastSent;
+      LastTLMpacketRecv_Ms = SyncPacketLastSent;
     ExpressLRS_currTlmDenom = newTlmDenom;
   }
 
@@ -320,23 +400,33 @@ void ICACHE_RAM_ATTR GenerateSyncPacketData(OTA_Sync_s * const syncPtr)
 
   syncPtr->fhssIndex = FHSSgetCurrIndex();
   syncPtr->nonce = OtaNonce;
-  syncPtr->rateIndex = Index;
-  syncPtr->newTlmRatio = newTlmRatio - TLM_RATIO_NO_TLM;
+  syncPtr->rfRateEnum = get_elrs_airRateConfig(Index)->enum_rate;
   syncPtr->switchEncMode = SwitchEncMode;
-  syncPtr->UID3 = UID[3];
+  syncPtr->newTlmRatio = newTlmRatio - TLM_RATIO_NO_TLM;
+  syncPtr->geminiMode = inGeminiMode();
+  syncPtr->otaProtocol = config.GetLinkMode();
   syncPtr->UID4 = UID[4];
   syncPtr->UID5 = UID[5];
 
   // For model match, the last byte of the binding ID is XORed with the inverse of the modelId
   if (!InBindingMode && config.GetModelMatch())
   {
-    syncPtr->UID5 ^= (~CRSFHandset::getModelID()) & MODELMATCH_MASK;
+    syncPtr->UID5 ^= (~crsfTransmitter.modelId) & MODELMATCH_MASK;
   }
 }
 
-uint8_t adjustPacketRateForBaud(uint8_t rateIndex)
+uint8_t adjustPacketRateForBaud(const uint8_t rateIndex)
 {
-  return rateIndex = get_elrs_HandsetRate_max(rateIndex, handset->getMinPacketInterval());
+  return get_elrs_HandsetRate_max(rateIndex, handset->getMinPacketInterval());
+}
+
+uint8_t adjustSwitchModeForAirRate(OtaSwitchMode_e eSwitchMode, uint8_t packetSize)
+{
+    // Only the fullres modes have 3 switch modes, so reset the switch mode if outside the
+    // range for 4ch mode
+    if (packetSize == OTA4_PACKET_SIZE && eSwitchMode > smHybridOr16ch)
+        return smWideOr8ch;
+    return eSwitchMode;
 }
 
 void SetRFLinkRate(uint8_t index) // Set speed of RF link
@@ -347,10 +437,19 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   bool invertIQ = InBindingMode || (UID[5] & 0x01);
   OtaSwitchMode_e newSwitchMode = (OtaSwitchMode_e)config.GetSwitchMode();
 
+  bool subGHz = FHSSconfig->freq_center < 1000000000;
+#if defined(RADIO_LR1121)
+  if (FHSSuseDualBand && subGHz)
+  {
+      subGHz = FHSSconfigDualBand->freq_center < 1000000000;
+  }
+#endif
+
   if ((ModParams == ExpressLRS_currAirRate_Modparams)
     && (RFperf == ExpressLRS_currAirRate_RFperfParams)
+    && (subGHz || invertIQ == Radio.IQinverted)
     && (OtaSwitchModeCurrent == newSwitchMode)
-    && (!InBindingMode))
+    && (!InBindingMode))  // binding mode must always execute code below to set frequency
     return;
 
   DBGLN("set rate %u", index);
@@ -360,16 +459,18 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
 #endif
   hwTimer::updateInterval(interval);
 
-  FHSSusePrimaryFreqBand = !(ModParams->radio_type == RADIO_TYPE_LR1121_LORA_2G4) && !(ModParams->radio_type == RADIO_TYPE_LR1121_GFSK_2G4);
-  FHSSuseDualBand = ModParams->radio_type == RADIO_TYPE_LR1121_LORA_DUAL;
+#if defined(RADIO_LR1121)
+  FHSSusePrimaryFreqBand = !RadioBandMod::isB2G4(ModParams->radio_type);
+  FHSSuseDualBand = RadioBandMod::isBDUAL(ModParams->radio_type);
+#endif
 
   Radio.Config(ModParams->bw, ModParams->sf, ModParams->cr, FHSSgetInitialFreq(),
-               ModParams->PreambleLen, invertIQ, ModParams->PayloadLength, ModParams->interval
+               ModParams->PreambleLen, invertIQ, ModParams->PayloadLength
 #if defined(RADIO_SX128X)
-               , uidMacSeedGet(), OtaCrcInitializer, (ModParams->radio_type == RADIO_TYPE_SX128x_FLRC)
+               , OtaGetUidSeed(), OtaCrcInitializer, ModParams->radio_type
 #endif
 #if defined(RADIO_LR1121)
-               , (ModParams->radio_type == RADIO_TYPE_LR1121_GFSK_900 || ModParams->radio_type == RADIO_TYPE_LR1121_GFSK_2G4), (uint8_t)UID[5], (uint8_t)UID[4]
+               , ModParams->radio_type, (uint8_t)UID[5], (uint8_t)UID[4]
 #endif
                );
 
@@ -377,17 +478,16 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   if (FHSSuseDualBand)
   {
     Radio.Config(ModParams->bw2, ModParams->sf2, ModParams->cr2, FHSSgetInitialGeminiFreq(),
-                ModParams->PreambleLen2, invertIQ, ModParams->PayloadLength, ModParams->interval,
-                (ModParams->radio_type == RADIO_TYPE_LR1121_GFSK_900 || ModParams->radio_type == RADIO_TYPE_LR1121_GFSK_2G4),
-                (uint8_t)UID[5], (uint8_t)UID[4], SX12XX_Radio_2);
+                ModParams->PreambleLen2, invertIQ, ModParams->PayloadLength,
+                ModParams->radio_type, (uint8_t)UID[5], (uint8_t)UID[4], SX12XX_Radio_2);
   }
 #endif
 
   Radio.FuzzySNRThreshold = (RFperf->DynpowerSnrThreshUp == DYNPOWER_SNR_THRESH_NONE) ? 0 : (RFperf->DynpowerSnrThreshUp - RFperf->DynpowerSnrThreshDn);
 
-  if ((isDualRadio() && config.GetAntennaMode() == TX_RADIO_MODE_GEMINI) || FHSSuseDualBand) // Gemini mode
+  if (inGeminiMode() || FHSSuseDualBand)
   {
-    Radio.SetFrequencyReg(FHSSgetInitialGeminiFreq(), SX12XX_Radio_2);
+    Radio.SetFrequencyReg(FHSSgetInitialGeminiFreq(), SX12XX_Radio_2, false);
   }
 
   // InitialFreq has been set, so lets also reset the FHSS Idx and Nonce.
@@ -395,102 +495,16 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   OtaNonce = 0;
 
   OtaUpdateSerializers(newSwitchMode, ModParams->PayloadLength);
-  MspSender.setMaxPackageIndex(ELRS_MSP_MAX_PACKAGES);
-  TelemetryReceiver.setMaxPackageIndex(OtaIsFullRes ? ELRS8_TELEMETRY_MAX_PACKAGES : ELRS4_TELEMETRY_MAX_PACKAGES);
+  DataUlSender.setMaxPackageIndex(ELRS_MSP_MAX_PACKAGES);
+  DataDlReceiver.setMaxPackageIndex(OtaIsFullRes ? ELRS8_DATA_DL_MAX_PACKAGES : ELRS4_DATA_DL_MAX_PACKAGES);
 
   ExpressLRS_currAirRate_Modparams = ModParams;
   ExpressLRS_currAirRate_RFperfParams = RFperf;
-  CRSF::LinkStatistics.rf_Mode = ModParams->enum_rate;
+  linkStats.rf_Mode = ModParams->enum_rate;
 
   handset->setPacketInterval(interval * ExpressLRS_currAirRate_Modparams->numOfSends);
-  connectionState = disconnected;
+  setConnectionState(disconnected);
   rfModeLastChangedMS = millis();
-}
-
-void ICACHE_RAM_ATTR HandleFHSS()
-{
-  uint8_t modresult = (OtaNonce + 1) % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
-  if (fhssLockPending)
-  {
-    fhssLockPending = false;
-    Radio.SetFrequencyReg(FHSSgetInitialFreq());
-  }
-  // If the next packet should be on the next FHSS frequency, do the hop
-  if (!InBindingMode && !fhssLocked && modresult == 0)
-  {
-    // Gemini mode
-    // If using DualBand always set the correct frequency band to the radios.  The HighFreq/LowFreq Tx amp is set during config.
-    if ((isDualRadio() && config.GetAntennaMode() == TX_RADIO_MODE_GEMINI) || FHSSuseDualBand)
-    {
-        // Optimises the SPI traffic order.
-        if (Radio.GetProcessingPacketRadio() == SX12XX_Radio_1)
-        {
-            uint32_t freqRadio = FHSSgetNextFreq();
-            Radio.SetFrequencyReg(FHSSgetGeminiFreq(), SX12XX_Radio_2);
-            Radio.SetFrequencyReg(freqRadio, SX12XX_Radio_1);
-        }
-        else
-        {
-            Radio.SetFrequencyReg(FHSSgetNextFreq(), SX12XX_Radio_1);
-            Radio.SetFrequencyReg(FHSSgetGeminiFreq(), SX12XX_Radio_2);
-        }
-    }
-    else
-    {
-      Radio.SetFrequencyReg(FHSSgetNextFreq());
-    }
-  }
-}
-
-void ICACHE_RAM_ATTR HandlePrepareForTLM()
-{
-  // If TLM enabled and next packet is going to be telemetry, start listening to have a large receive window (time-wise)
-  if (ExpressLRS_currTlmDenom != 1 && ((OtaNonce + 1) % ExpressLRS_currTlmDenom) == 0)
-  {
-    Radio.RXnb();
-    TelemetryRcvPhase = ttrpPreReceiveGap;
-  }
-}
-
-void injectBackpackPanTiltRollData(uint32_t const now)
-{
-#if !defined(CRITICAL_FLASH)
-  // Do not override channels if the backpack is NOT communicating or PanTiltRoll is disabled
-  if (config.GetPTREnableChannel() == HT_OFF || backpackVersion[0] == 0)
-  {
-    return;
-  }
-
-  uint8_t ptrStartChannel = config.GetPTRStartChannel();
-  bool enable = config.GetPTREnableChannel() == HT_ON;
-  if (!enable)
-  {
-    uint8_t chan = CRSF_to_BIT(ChannelData[config.GetPTREnableChannel() / 2 + 3]);
-    if (config.GetPTREnableChannel() % 2 == 0)
-    {
-      enable |= chan;
-    }
-    else
-    {
-      enable |= !chan;
-    }
-  }
-
-  if (enable != headTrackingEnabled)
-  {
-    headTrackingEnabled = enable;
-    HTEnableFlagReadyToSend = true;
-  }
-
-  // If enabled and this packet is less that 1 second old then use it
-  if (enable && now - lastPTRValidTimeMs < 1000)
-  {
-    ChannelData[ptrStartChannel + 4] = ptrChannelData[0];
-    ChannelData[ptrStartChannel + 5] = ptrChannelData[1];
-    ChannelData[ptrStartChannel + 6] = ptrChannelData[2];
-  }
-  // else if not enabled or PTR is old, do not override ChannelData from handset
-#endif
 }
 
 void ICACHE_RAM_ATTR SendRCdataToRF()
@@ -503,7 +517,7 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   if (lastRcData && (micros() - lastRcData > 1000000))
   {
     // The tx is in Mavlink mode and without a valid crsf or RC input.  Do not send stale or fake zero packet RC!
-    // Only send sync and MSP packets.
+    // Only send SYNC and DATA packets.
     if (config.GetLinkMode() == TX_MAVLINK_MODE)
     {
       dontSendChannelData = true;
@@ -525,14 +539,13 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   uint32_t SyncInterval = (connectionState == connected && !isTlmDisarmed) ? ExpressLRS_currAirRate_RFperfParams->SyncPktIntervalConnected : ExpressLRS_currAirRate_RFperfParams->SyncPktIntervalDisconnected;
   bool skipSync = InBindingMode ||
     // TLM_RATIO_DISARMED keeps sending sync packets even when armed until the RX stops sending telemetry and the TLM=Off has taken effect
-    (isTlmDisarmed && handset->IsArmed() && (ExpressLRS_currTlmDenom == 1));
+    (isTlmDisarmed && isArmed && (ExpressLRS_currTlmDenom == 1));
 
   uint8_t NonceFHSSresult = OtaNonce % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
 
   // Sync spam only happens on slot 1 and 2 and can't be disabled
   if ((syncSpamCounter || (syncSpamCounterAfterRateChange && FHSSonSyncChannel())) && (NonceFHSSresult == 1 || NonceFHSSresult == 2))
   {
-    DBGLN("SYN");
     otaPkt.std.type = PACKET_TYPE_SYNC;
     GenerateSyncPacketData(OtaIsFullRes ? &otaPkt.full.sync.sync : &otaPkt.std.sync);
     syncSlot = 0; // reset the sync slot in case the new rate (after the syncspam) has a lower FHSShopInterval
@@ -541,7 +554,6 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   // But only on the sync FHSS channel and with a timed delay between them
   else if ((!skipSync) && ((syncSlot / 2) <= NonceFHSSresult) && (now - SyncPacketLastSent > SyncInterval) && FHSSonSyncChannel())
   {
-    DBGLN("SYNC");
     otaPkt.std.type = PACKET_TYPE_SYNC;
     GenerateSyncPacketData(OtaIsFullRes ? &otaPkt.full.sync.sync : &otaPkt.std.sync);
     syncSlot = (syncSlot + 1) % (ExpressLRS_currAirRate_Modparams->FHSShopInterval * 2);
@@ -552,66 +564,63 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
     {
       OtaPackAirportData(&otaPkt, &apInputBuffer);
     }
-    else if ((NextPacketIsMspData && MspSender.IsActive()) || dontSendChannelData)
+    else if ((NextPacketIsDataUl && DataUlSender.IsActive()) || dontSendChannelData)
     {
-      otaPkt.std.type = PACKET_TYPE_MSPDATA;
+      otaPkt.std.type = PACKET_TYPE_DATA;
       if (OtaIsFullRes)
       {
-        otaPkt.full.msp_ul.packageIndex = MspSender.GetCurrentPayload(
-          otaPkt.full.msp_ul.payload,
-          sizeof(otaPkt.full.msp_ul.payload));
+        otaPkt.full.data_ul.packageIndex = DataUlSender.GetCurrentPayload(
+          otaPkt.full.data_ul.payload,
+          sizeof(otaPkt.full.data_ul.payload));
         if (config.GetLinkMode() == TX_MAVLINK_MODE)
-          otaPkt.full.msp_ul.tlmFlag = TelemetryReceiver.GetCurrentConfirm();
+          otaPkt.full.data_ul.stubbornAck = DataDlReceiver.GetCurrentConfirm();
       }
       else
       {
-        otaPkt.std.msp_ul.packageIndex = MspSender.GetCurrentPayload(
-          otaPkt.std.msp_ul.payload,
-          sizeof(otaPkt.std.msp_ul.payload));
+        otaPkt.std.data_ul.packageIndex = DataUlSender.GetCurrentPayload(
+          otaPkt.std.data_ul.payload,
+          sizeof(otaPkt.std.data_ul.payload));
         if (config.GetLinkMode() == TX_MAVLINK_MODE)
-          otaPkt.std.msp_ul.tlmFlag = TelemetryReceiver.GetCurrentConfirm();
+          otaPkt.std.data_ul.stubbornAck = DataDlReceiver.GetCurrentConfirm();
       }
 
-      // send channel data next so the channel messages also get sent during msp transmissions
-      NextPacketIsMspData = false;
-      // counter can be increased even for normal msp messages since it's reset if a real bind message should be sent
+      // send channel data next so the channel messages also get sent during data uplink transmissions
+      NextPacketIsDataUl = false;
+      // counter can be increased even for normal DataUl messages since it's reset if a real bind message should be sent
       BindingSendCount++;
-      // If the telemetry ratio isn't already 1:2, send a sync packet to boost it
-      // to add bandwidth for the reply
-      if (ExpressLRS_currTlmDenom != 2)
+      // If not in TlmBurst, request a sync packet soon to trigger higher download bandwidth for reply
+      if (syncTelemBoostState == stbIdle)
         syncSpamCounter = 1;
+      syncTelemBoostState = stbRequested;
     }
     else
     {
-      // always enable msp after a channel package since the slot is only used if MspSender has data to send
-      NextPacketIsMspData = true;
+      // always enable DataUl after a channel package since the slot is only used if DataUlSender has data to send
+      NextPacketIsDataUl = true;
 
-      injectBackpackPanTiltRollData(now);
-      OtaPackChannelData(&otaPkt, ChannelData, TelemetryReceiver.GetCurrentConfirm(), ExpressLRS_currTlmDenom);
+      OtaPackChannelData(&otaPkt, ChannelData, DataDlReceiver.GetCurrentConfirm());
     }
   }
 
   ///// Next, Calculate the CRC and put it into the buffer /////
   OtaGeneratePacketCrc(&otaPkt);
 
-  SX12XX_Radio_Number_t transmittingRadio = Radio.GetLastSuccessfulPacketRadio();
+  SX12XX_Radio_Number_t transmittingRadio = SX12XX_Radio_All;
 
   if (isDualRadio())
   {
+    // Single antenna modes: tx on one antenna, and true diversity rx for tlm reception.
     switch (config.GetAntennaMode())
     {
-    case TX_RADIO_MODE_GEMINI:
-      transmittingRadio = SX12XX_Radio_All; // Gemini mode
-      break;
     case TX_RADIO_MODE_ANT_1:
-      transmittingRadio = SX12XX_Radio_1; // Single antenna tx and true diversity rx for tlm receiption.
+      transmittingRadio = SX12XX_Radio_1;
       break;
     case TX_RADIO_MODE_ANT_2:
-      transmittingRadio = SX12XX_Radio_2; // Single antenna tx and true diversity rx for tlm receiption.
+      transmittingRadio = SX12XX_Radio_2;
       break;
     case TX_RADIO_MODE_SWITCH:
-      if(OtaNonce%2==0)   transmittingRadio = SX12XX_Radio_1; // Single antenna tx and true diversity rx for tlm receiption.
-      else   transmittingRadio = SX12XX_Radio_2; // Single antenna tx and true diversity rx for tlm receiption.
+      static boolean toggle = false;
+      transmittingRadio = (toggle ^= true) ? SX12XX_Radio_1 : SX12XX_Radio_2;
       break;
     default:
       break;
@@ -619,7 +628,7 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   }
 
 #if defined(Regulatory_Domain_EU_CE_2400)
-  transmittingRadio &= ChannelIsClear(transmittingRadio);   // weed out the radio(s) if channel in use
+  transmittingRadio = LbtChannelIsClear(transmittingRadio);   // weed out the radio(s) if channel in use
 
   if (transmittingRadio == SX12XX_Radio_NONE)
   {
@@ -630,7 +639,7 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   else
 #endif
   {
-    Radio.TXnb((uint8_t*)&otaPkt, ExpressLRS_currAirRate_Modparams->PayloadLength, transmittingRadio);
+    Radio.TXnb((uint8_t*)&otaPkt, false, (uint8_t*)&otaPkt, transmittingRadio);
   }
 }
 
@@ -655,8 +664,6 @@ void ICACHE_RAM_ATTR timerCallback()
     return;
   }
 
-  Radio.isFirstRxIrq = true;
-
   // Sync OpenTX to this point
   if (!(OtaNonce % ExpressLRS_currAirRate_Modparams->numOfSends))
   {
@@ -670,7 +677,7 @@ void ICACHE_RAM_ATTR timerCallback()
   // Tx Antenna Diversity
   if ((OtaNonce % ExpressLRS_currAirRate_Modparams->numOfSends == 0 || // Swicth with new packet data
       OtaNonce % ExpressLRS_currAirRate_Modparams->numOfSends == ExpressLRS_currAirRate_Modparams->numOfSends / 2) && // Swicth in the middle of DVDA sends
-      TelemetryRcvPhase == ttrpTransmitting) // Only switch when transmitting.  A diversity rx will send tlm back on the best antenna.  So dont switch away from it.
+      TelemetryRcvPhase == ttrpTransmitting) // Only switch when transmitting.  A diversity rx will send tlm back on the best antenna.  So don't switch away from it.
   {
     switchDiversityAntennas();
   }
@@ -686,14 +693,14 @@ void ICACHE_RAM_ATTR timerCallback()
     TelemetryRcvPhase = ttrpExpectingTelem;
 #if defined(Regulatory_Domain_EU_CE_2400)
     // Use downlink LQ for LBT success ratio instead for EU/CE reg domain
-    CRSF::LinkStatistics.downlink_Link_quality = LBTSuccessCalc.getLQ();
+    linkStats.downlink_Link_quality = LBTSuccessCalc.getLQ();
 #else
-    CRSF::LinkStatistics.downlink_Link_quality = LQCalc.getLQ();
+    linkStats.downlink_Link_quality = LqTQly.getLQ();
 #endif
-    LQCalc.inc();
+    LqTQly.inc();
     return;
   }
-  else if (TelemetryRcvPhase == ttrpExpectingTelem && !LQCalc.currentIsSet())
+  else if (TelemetryRcvPhase == ttrpExpectingTelem && !LqTQly.currentIsSet())
   {
     // Indicate no telemetry packet received to the DP system
     DynamicPower_TelemetryUpdate(DYNPOWER_UPDATE_MISSED);
@@ -707,14 +714,14 @@ void ICACHE_RAM_ATTR timerCallback()
 static void UARTdisconnected()
 {
   hwTimer::stop();
-  connectionState = noCrossfire;
+  setConnectionState(noCrossfire);
+  // Since not going from connected -> disconnected, set LQ=0 to make sure the handset knows we stopped TXing when it comes back
+  linkStats.uplink_Link_quality = 0;
 }
 
 static void UARTconnected()
 {
-  #if defined(PLATFORM_ESP32) || defined(PLATFORM_ESP8266)
   webserverPreventAutoStart = true;
-  #endif
   rfModeLastChangedMS = millis(); // force syncspam on first packets
 
   auto index = adjustPacketRateForBaud(config.GetRate());
@@ -724,7 +731,7 @@ static void UARTconnected()
     // When CRSF first connects, always go into a brief delay before
     // starting to transmit, to make sure a ModelID update isn't coming
     // right behind it
-    connectionState = awaitingModelId;
+    setConnectionState(awaitingModelId);
   }
   // But start the timer to get OpenTX sync going and a ModelID update sent
   hwTimer::resume();
@@ -736,7 +743,7 @@ void ResetPower()
   // (user may be turning up the power while flying and dropping the power may compromise the link)
   if (config.GetDynamicPower())
   {
-    if (!handset->IsArmed())
+    if (!isArmed)
     {
       // if dynamic power enabled and not armed then set to MinPower
       POWERMGNT::setPower(MinPower);
@@ -752,54 +759,51 @@ void ResetPower()
     POWERMGNT::setPower((PowerLevels_e)config.GetPower());
   }
   // TLM interval is set on the next SYNC packet
-#if defined(Regulatory_Domain_EU_CE_2400)
-  LBTEnabled = (config.GetPower() > PWR_10mW);
-#endif
 }
 
 static void ChangeRadioParams()
 {
   ModelUpdatePending = false;
-  FHSSrandomiseFHSSsequence(uidMacSeedGet());
+  ResetPower(); // Call before SetRFLinkRate(). The LR1121 Radio lib can now set the correct output power in Config().
   SetRFLinkRate(config.GetRate());
-  ResetPower();
+  LbtEnableIfRequired();
 }
 
 void ModelUpdateReq()
 {
   // Force synspam with the current rate parameters in case already have a connection established
-  if (config.SetModelId(CRSFHandset::getModelID()))
+  if (config.SetModelId(crsfTransmitter.modelId))
   {
     syncSpamCounter = syncSpamAmount;
     syncSpamCounterAfterRateChange = syncSpamAmountAfterRateChange;
     ModelUpdatePending = true;
   }
 
-  devicesTriggerEvent();
+  devicesTriggerEvent(EVENT_MODEL_SELECTED);
 
   // Jump from awaitingModelId to transmitting to break the startup delay now
   // that the ModelID has been confirmed by the handset
   if (connectionState == awaitingModelId)
   {
-    connectionState = disconnected;
+    setConnectionState(disconnected);
   }
 }
 
 static void ConfigChangeCommit()
 {
-  // Adjust the air rate based on teh current baud rate
-  auto index = adjustPacketRateForBaud(config.GetRate());
-  config.SetRate(index);
-
   // Write the uncommitted eeprom values (may block for a while)
-  config.Commit();
+  uint32_t changes = config.Commit();
+#if defined(CUSTOM_DOMAIN_ENABLE)
+  if (changes & EVENT_CONFIG_MAIN_CHANGED)
+  {
+    FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+  }
+#endif
   // Change params after the blocking finishes as a rate change will change the radio freq
   ChangeRadioParams();
   // Clear the commitInProgress flag so normal processing resumes
   commitInProgress = false;
-  // UpdateFolderNames is expensive so it is called directly instead of in event() which gets called a lot
-  luadevUpdateFolderNames();
-  devicesTriggerEvent();
+  devicesTriggerEvent(changes);
 }
 
 static void CheckConfigChangePending()
@@ -829,19 +833,14 @@ static void CheckConfigChangePending()
 
 bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 {
-  if (LQCalc.currentIsSet())
+  // busyTransmitting is required here to prevent accidental rxdone IRQs due to interference triggering RXdoneISR.
+  if (LqTQly.currentIsSet() || busyTransmitting)
   {
-    return false; // Already received tlm, do not run ProcessTLMpacket() again.
+    return false; // Already received tlm, do not run ProcessDownlinkPacket() again.
   }
 
-  bool packetSuccessful = ProcessTLMpacket(status);
-#if defined(Regulatory_Domain_EU_CE_2400)
-  if (packetSuccessful)
-  {
-    SetClearChannelAssessmentTime();
-  }
-#endif
-  busyTransmitting = false;
+  LbtCcaTimerStart();
+  const bool packetSuccessful = ProcessDownlinkPacket(status);
   return packetSuccessful;
 }
 
@@ -854,23 +853,56 @@ void ICACHE_RAM_ATTR TXdoneISR()
 
   if (connectionState != awaitingModelId)
   {
-    HandleFHSS();
-    HandlePrepareForTLM();
-#if defined(Regulatory_Domain_EU_CE_2400)
-    if (TelemetryRcvPhase != ttrpPreReceiveGap)
+    const uint8_t modResult = (OtaNonce + 1) % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
+
+    // If TLM enabled and next packet is going to be telemetry, or in LBT mode, start listening to have a large receive window (time-wise)
+    const bool nextIsTLM = ExpressLRS_currTlmDenom != 1 && ((OtaNonce + 1) % ExpressLRS_currTlmDenom) == 0;
+    const bool doRx = nextIsTLM || LbtIsEnabled;
+
+    // If the next packet should be on the next FHSS frequency, do the hop
+    if (!InBindingMode && modResult == 0)
     {
-      // Start RX for Listen Before Talk early because it takes about 100us
-      // from RX enable to valid instant RSSI values are returned.
-      // If rx was already started by TLM prepare above, this call will let RX
-      // continue as normal.
-      SetClearChannelAssessmentTime();
+      // Gemini mode
+      // If using DualBand always set the correct frequency band to the radios.  The HighFreq/LowFreq Tx amp is set during config.
+      if (inGeminiMode() || FHSSuseDualBand)
+      {
+        // Optimises the SPI traffic order.
+        if (Radio.GetProcessingPacketRadio() == SX12XX_Radio_1)
+        {
+          const uint32_t freqRadio = FHSSgetNextFreq();
+          Radio.SetFrequencyReg(FHSSgetGeminiFreq(), SX12XX_Radio_2, doRx);
+          Radio.SetFrequencyReg(freqRadio, SX12XX_Radio_1, doRx);
+        }
+        else
+        {
+          Radio.SetFrequencyReg(FHSSgetNextFreq(), SX12XX_Radio_1, doRx);
+          Radio.SetFrequencyReg(FHSSgetGeminiFreq(), SX12XX_Radio_2, doRx);
+        }
+      }
+      else
+      {
+        Radio.SetFrequencyReg(FHSSgetNextFreq(), SX12XX_Radio_All, doRx);
+      }
     }
-#endif // non-CE
+    else if (doRx)
+    {
+      Radio.RXnb();
+    }
+
+    // If TLM enabled and next packet is going to be telemetry
+    if (nextIsTLM)
+    {
+      TelemetryRcvPhase = ttrpPreReceiveGap;
+    }
+    else if (doRx)
+    {
+      LbtCcaTimerStart();
+    }
   }
   busyTransmitting = false;
 }
 
-void UpdateConnectDisconnectStatus()
+static void UpdateConnectDisconnectStatus()
 {
   // Number of telemetry packets which can be lost in a row before going to disconnected state
   constexpr unsigned RX_LOSS_CNT = 5;
@@ -879,32 +911,34 @@ void UpdateConnectDisconnectStatus()
     (uint32_t)ExpressLRS_currTlmDenom * ExpressLRS_currAirRate_Modparams->interval / (1000U / RX_LOSS_CNT)
     ) + 2U;
   // Capture the last before now so it will always be <= now
-  volatile uint32_t lastTlmMillis = LastTLMpacketRecvMillis;
-  volatile uint32_t now = millis();
+  const uint32_t lastTlmMillis = LastTLMpacketRecv_Ms;
+  const uint32_t now = millis();
   if (lastTlmMillis && ((now - lastTlmMillis) <= msConnectionLostTimeout))
   {
     if (connectionState != connected)
     {
-      connectionState = connected;
-      CRSFHandset::ForwardDevicePings = true;
       DBGLN("got downlink conn");
+      RxDisconnected_Ms = 0;
+      setConnectionState(connected);
 
       apInputBuffer.flush();
       apOutputBuffer.flush();
       uartInputBuffer.flush();
- 
-      VtxTriggerSend();
     }
   }
   // If past RX_LOSS_CNT, or in awaitingModelId state for longer than DisconnectTimeoutMs, go to disconnected
   else if (connectionState == connected ||
-    (now - rfModeLastChangedMS) > ExpressLRS_currAirRate_RFperfParams->DisconnectTimeoutMs)
+    (connectionState == awaitingModelId && (now - rfModeLastChangedMS) > ExpressLRS_currAirRate_RFperfParams->DisconnectTimeoutMs))
   {
-    connectionState = disconnected;
-    // DBGLN("Disconnected | %d | %d", now - lastTlmMillis, msConnectionLostTimeout);
+    setConnectionState(disconnected);
+    RxDisconnected_Ms = now;
     connectionHasModelMatch = true;
-    CRSFHandset::ForwardDevicePings = false;
   }
+}
+
+void clearOTAQueue()
+{
+    otaConnector.resetOutputQueue();
 }
 
 void SetSyncSpam()
@@ -920,7 +954,7 @@ void SetSyncSpam()
 static void SendRxWiFiOverMSP()
 {
   MSPDataPackage[0] = MSP_ELRS_SET_RX_WIFI_MODE;
-  MspSender.SetDataToTransmit(MSPDataPackage, 1);
+  DataUlSender.SetDataToTransmit(MSPDataPackage, 1);
 }
 
 static void CheckReadyToSend()
@@ -928,14 +962,13 @@ static void CheckReadyToSend()
   if (RxWiFiReadyToSend)
   {
     RxWiFiReadyToSend = false;
-    if (!handset->IsArmed())
+    if (!isArmed)
     {
       SendRxWiFiOverMSP();
     }
   }
 }
 
-#if !defined(CRITICAL_FLASH)
 void OnPowerGetCalibration(mspPacket_t *packet)
 {
   uint8_t index = packet->readByte();
@@ -950,7 +983,7 @@ void OnPowerSetCalibration(mspPacket_t *packet)
   uint8_t index = packet->readByte();
   int8_t value = packet->readByte();
 
-  if((index < 0) || (index > PWR_COUNT))
+  if((index < 0) || (index >= PWR_COUNT))
   {
     DBGLN("calibration error index %d out of range", index);
     return;
@@ -965,15 +998,14 @@ void OnPowerSetCalibration(mspPacket_t *packet)
   DBGLN("power calibration done %d, %d", index, value);
   hwTimer::resume();
 }
-#endif
 
 void SendUIDOverMSP()
 {
   MSPDataPackage[0] = MSP_ELRS_BIND;
   memcpy(&MSPDataPackage[1], &UID[2], 4);
   BindingSendCount = 0;
-  MspSender.ResetState();
-  MspSender.SetDataToTransmit(MSPDataPackage, 5);
+  DataUlSender.ResetState();
+  DataUlSender.SetDataToTransmit(MSPDataPackage, 5);
 }
 
 static void EnterBindingMode()
@@ -988,14 +1020,14 @@ static void EnterBindingMode()
   // Queue up sending the Master UID as MSP packets
   SendUIDOverMSP();
 
-  // Binding uses a CRCInit=0, 50Hz, and InvertIQ
-  OtaCrcInitializer = 0;
+  // Binding uses 50Hz, and InvertIQ
+  OtaCrcInitializer = OTA_VERSION_ID;
   OtaNonce = 0; // Lock the OtaNonce to prevent syncspam packets
   InBindingMode = true; // Set binding mode before SetRFLinkRate() for correct IQ
 
   // Start attempting to bind
   // Lock the RF rate and freq while binding
-  SetRFLinkRate(enumRatetoIndex(RATE_BINDING));
+  SetRFLinkRate(enumRatetoIndexSafe(RATE_BINDING));
 
   // Start transmitting again
   hwTimer::resume();
@@ -1003,39 +1035,19 @@ static void EnterBindingMode()
   DBGLN("Entered binding mode at freq = %d", Radio.currFreq);
 }
 
-void reset_into_bootloader(void)
-{
-    // SERIAL_PROTOCOL_TX.println((const char *)&target_name[4]);
-    // SERIAL_PROTOCOL_TX.flush();
-#if defined(PLATFORM_ESP8266)
-    delay(100);
-    ESP.rebootIntoUartDownloadMode();
-#elif defined(PLATFORM_ESP32)
-    delay(100);
-    connectionState = serialUpdate;
-#elif defined(PLATFORM_STM32)
-    __disable_irq();
-    __HAL_RCC_SYSCFG_CLK_ENABLE();
-    __DSB();
-    __ISB();
-    SCB->VTOR = 0;
-    NVIC_SystemReset();
-#endif
-}
-
 static void ExitBindingMode()
 {
   if (!InBindingMode)
     return;
 
-  MspSender.ResetState();
+  DataUlSender.ResetState();
 
   // Reset CRCInit to UID-defined value
   OtaUpdateCrcInitFromUid();
   InBindingMode = false; // Clear binding mode before SetRFLinkRate() for correct IQ
 
   UARTconnected();
-  
+
   SetRFLinkRate(config.GetRate()); //return to original rate
 
   DBGLN("Exiting binding mode");
@@ -1047,36 +1059,9 @@ void EnterBindingModeSafely()
   EnterBindingMode();
 }
 
-static uint32_t psuedo_rand(uint32_t x) {
-	x ^= x << 13;
-	x ^= x >> 17;
-	x ^= x << 5;
-    return x;
-}
-
-void EnterUnbindMode()
-{
-  DBGLN("Entering TX unbind mode");
-  // Generate random UID seeded from time-from-boot XOR hardware unique ID
-  uint32_t seed = millis() ^ HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2();
-  seed = psuedo_rand(seed);
-  uint32_t lo = psuedo_rand(seed);
-  uint32_t hi = psuedo_rand(lo);
-  UID[0] = (lo >> 24) & 0xFF;
-  UID[1] = (lo >> 16) & 0xFF;
-  UID[2] = (lo >>  8) & 0xFF;
-  UID[3] =  lo        & 0xFF;
-  UID[4] = (hi >> 24) & 0xFF;
-  UID[5] = (hi >> 16) & 0xFF;
-  config.SetUID(UID);
-  config.Commit();
-  OtaUpdateCrcInitFromUid();
-  FHSSrandomiseFHSSsequence(uidMacSeedGet());
-}
-
 void ProcessMSPPacket(uint32_t now, mspPacket_t *packet)
 {
-#if !defined(CRITICAL_FLASH)
+#if defined(PLATFORM_ESP32)
   // Inspect packet for ELRS specific opcodes
   if (packet->function == MSP_ELRS_FUNC)
   {
@@ -1109,19 +1094,16 @@ void ProcessMSPPacket(uint32_t now, mspPacket_t *packet)
 
     VtxTriggerSend();
   }
-  else if (packet->function == MSP_ELRS_BACKPACK_SET_PTR && packet->payloadSize == 6)
+  else if (packet->function == MSP_ELRS_BACKPACK_SET_PTR)
   {
-    ptrChannelData[0] = packet->payload[0] + (packet->payload[1] << 8);
-    ptrChannelData[1] = packet->payload[2] + (packet->payload[3] << 8);
-    ptrChannelData[2] = packet->payload[4] + (packet->payload[5] << 8);
-    lastPTRValidTimeMs = now;
+    processPanTiltRollPacket(now, packet);
   }
-#endif
   if (packet->function == MSP_ELRS_GET_BACKPACK_VERSION)
   {
     memset(backpackVersion, 0, sizeof(backpackVersion));
     memcpy(backpackVersion, packet->payload, min((size_t)packet->payloadSize, sizeof(backpackVersion)-1));
   }
+#endif
 }
 
 void ParseMSPData(uint8_t *buf, uint8_t size)
@@ -1154,54 +1136,61 @@ static void HandleUARTout()
 
 static void HandleUARTin()
 {
-  // Read from the USB serial port
-  if (TxUSB->available())
+  if (firmwareOptions.is_airport)
   {
-    if (firmwareOptions.is_airport)
-    {
-      auto size = std::min(apInputBuffer.free(), (uint16_t)TxUSB->available());
-      if (size > 0)
-      {
-        uint8_t buf[size];
-        TxUSB->readBytes(buf, size);
-        apInputBuffer.lock();
-        apInputBuffer.pushBytes(buf, size);
-        apInputBuffer.unlock();
-      }
-    }
-    else
-    {
-      auto size = std::min(uartInputBuffer.free(), (uint16_t)TxUSB->available());
-      if (size > 0)
-      {
-        uint8_t buf[size];
-        TxUSB->readBytes(buf, size);
-        uartInputBuffer.lock();
-        uartInputBuffer.pushBytes(buf, size);
-        uartInputBuffer.unlock();
-
-        // Lets check if the data is Mav and auto change LinkMode
-        // Start the hwTimer since the user might be operating the module as a standalone unit without a handset.
-        if (connectionState == noCrossfire)
-        {
-          if (isThisAMavPacket(buf, size))
-          {
-            config.SetLinkMode(TX_MAVLINK_MODE);
-            UARTconnected();
-          }
-        }
-      }
-    }
-  }
-
-  // Read from the Backpack serial port
-  if (TxBackpack->available())
-  {
-    auto size = std::min(uartInputBuffer.free(), (uint16_t)TxBackpack->available());
+    auto size = std::min(apInputBuffer.free(), (uint16_t)TxUSB->available());
     if (size > 0)
     {
       uint8_t buf[size];
-      TxBackpack->readBytes(buf, size);
+      TxUSB->readBytes(buf, size);
+      apInputBuffer.lock();
+      apInputBuffer.pushBytes(buf, size);
+      apInputBuffer.unlock();
+    }
+    return;
+  }
+
+  // USB serial input
+  // If a mavlink packet is received on the USB input, automatically switch the link mode to and process as mavlink
+  // Otherwise, USB serial data is processed as CRSF
+  auto size = std::min(uartInputBuffer.free(), (uint16_t)TxUSB->available());
+  if (size > 0)
+  {
+    uint8_t buf[size];
+    TxUSB->readBytes(buf, size);
+
+    // If the data is MAVLink, then auto change LinkMode and start the radio link
+    // since the user might be operating the module as a standalone unit without a handset.
+    if (connectionState == noCrossfire)
+    {
+      if (isThisAMavPacket(buf, size))
+      {
+        config.SetLinkMode(TX_MAVLINK_MODE);
+        UARTconnected();
+      }
+    }
+    if (config.GetLinkMode() == TX_MAVLINK_MODE)
+    {
+      uartInputBuffer.lock();
+      uartInputBuffer.pushBytes(buf, size);
+      uartInputBuffer.unlock();
+    }
+    else
+    {
+      crsfParser.processBytes(&usbConnector, buf, size);
+    }
+  }
+
+  // Backpack serial input
+  // Backpack will not switch modes, but will process data as mavlink if the link mode is already set to mavlink
+  // Backpack serial data is ALSO always processed as backpack MSP
+  if (BackpackOrLogStrm != TxUSB && BackpackOrLogStrm->available())
+  {
+    auto size = std::min(uartInputBuffer.free(), (uint16_t)BackpackOrLogStrm->available());
+    if (size > 0)
+    {
+      uint8_t buf[size];
+      BackpackOrLogStrm->readBytes(buf, size);
 
       // If the TX is in Mavlink mode, push the bytes into the fifo buffer
       if (config.GetLinkMode() == TX_MAVLINK_MODE)
@@ -1210,8 +1199,8 @@ static void HandleUARTin()
         uartInputBuffer.pushBytes(buf, size);
         uartInputBuffer.unlock();
 
-        // The tx is in Mavlink mode and receiving data from the Backpack.
-        // Start the hwTimer since the user might be operating the module as a standalone unit without a handset.
+        // The TX is in MAVLink mode and receiving data from the Backpack,
+        // start the radio since the user might be operating the module as a standalone unit without a handset.
         if (connectionState == noCrossfire)
         {
           if (isThisAMavPacket(buf, size))
@@ -1225,6 +1214,27 @@ static void HandleUARTin()
       ParseMSPData(buf, size);
     }
   }
+
+  if (config.GetLinkMode() == TX_MAVLINK_MODE)
+  {
+    // Use DataUlSender for MAVLINK uplink data
+    uint8_t *nextPayload = 0;
+    uint8_t nextPlayloadSize = 0;
+    uint16_t count = uartInputBuffer.size();
+    if (count > 0 && !DataUlSender.IsActive())
+    {
+      count = std::min(count, (uint16_t)CRSF_PAYLOAD_SIZE_MAX);
+      mavlinkSSBuffer[0] = MSP_ELRS_MAVLINK_TLM; // Used on RX to differentiate between std msp opcodes and mavlink
+      mavlinkSSBuffer[1] = count;
+      // Following n bytes are just raw mavlink
+      uartInputBuffer.lock();
+      uartInputBuffer.popBytes(mavlinkSSBuffer + CRSF_FRAME_NOT_COUNTED_BYTES, count);
+      uartInputBuffer.unlock();
+      nextPayload = mavlinkSSBuffer;
+      nextPlayloadSize = count + CRSF_FRAME_NOT_COUNTED_BYTES;
+      DataUlSender.SetDataToTransmit(nextPayload, nextPlayloadSize);
+    }
+  }
 }
 
 static void setupSerial()
@@ -1233,10 +1243,16 @@ static void setupSerial()
    * This is always done because we need a place to send data even if there is no backpack!
    */
 
-// Setup TxBackpack
+// Setup BackpackOrLogStrm
 #if defined(PLATFORM_ESP32)
   Stream *serialPort;
-  if (GPIO_PIN_DEBUG_RX != UNDEF_PIN && GPIO_PIN_DEBUG_TX != UNDEF_PIN)
+
+  if(firmwareOptions.is_airport)
+  {
+    serialPort = new HardwareSerial(1);
+    ((HardwareSerial *)serialPort)->begin(firmwareOptions.uart_baud, SERIAL_8N1, U0RXD_GPIO_NUM, U0TXD_GPIO_NUM);
+  }
+  else if (GPIO_PIN_DEBUG_RX != UNDEF_PIN && GPIO_PIN_DEBUG_TX != UNDEF_PIN)
   {
     serialPort = new HardwareSerial(2);
     ((HardwareSerial *)serialPort)->begin(BACKPACK_LOGGING_BAUD, SERIAL_8N1, GPIO_PIN_DEBUG_RX, GPIO_PIN_DEBUG_TX);
@@ -1256,48 +1272,26 @@ static void setupSerial()
   {
     serialPort = new NullStream();
   }
-#elif defined(TARGET_TX_FM30)
-  #if defined(PIO_FRAMEWORK_ARDUINO_ENABLE_CDC)
-    USBSerial *serialPort = &SerialUSB; // No way to disable creating SerialUSB global, so use it
-    serialPort->begin();
-  #else
-    Stream *serialPort = new NullStream();
-  #endif
 #elif defined(M0139)
   HardwareSerial *serialPort = new HardwareSerial(USART2);
   serialPort->setRx((uint32_t)PA3);
   serialPort->setTx((uint32_t)PA2);
-  serialPort->begin(420000);
-#elif (defined(GPIO_PIN_DEBUG_RX) && GPIO_PIN_DEBUG_RX != UNDEF_PIN) || (defined(GPIO_PIN_DEBUG_TX) && GPIO_PIN_DEBUG_TX != UNDEF_PIN)
-  HardwareSerial *serialPort = new HardwareSerial(2);
-  #if defined(GPIO_PIN_DEBUG_RX) && GPIO_PIN_DEBUG_RX != UNDEF_PIN
-    serialPort->setRx(GPIO_PIN_DEBUG_RX);
-  #endif
-  #if defined(GPIO_PIN_DEBUG_TX) && GPIO_PIN_DEBUG_TX != UNDEF_PIN
-    serialPort->setTx(GPIO_PIN_DEBUG_TX);
-  #endif
-  serialPort->begin(420000);
-#else
-  #error NO DEBUG
-  Stream *serialPort = new NullStream();
+  serialPort->begin(BACKPACK_LOGGING_BAUD);
 #endif
-  TxBackpack = serialPort;
-
-#if defined(PLATFORM_ESP32_S3)
-  Serial.begin(460800);
-#endif
+  BackpackOrLogStrm = serialPort;
 
 // Setup TxUSB
 #if defined(PLATFORM_ESP32_S3)
+  // Because we have ARDUINO_USB_MODE enabled, we use USBSerial as the USB device.
   USBSerial.begin(firmwareOptions.uart_baud);
   TxUSB = &USBSerial;
-#elif defined(PLATFORM_ESP32)
-  if (GPIO_PIN_DEBUG_RX == 3 && GPIO_PIN_DEBUG_TX == 1)
+#elif defined(PLATFORM_ESP32) && !defined(PLATFORM_ESP32_C3)
+  if (GPIO_PIN_DEBUG_RX == U0RXD_GPIO_NUM && GPIO_PIN_DEBUG_TX == U0TXD_GPIO_NUM)
   {
-    // The backpack is already assigned on UART0 (pins 3, 1)
+    // The backpack or Airpoirt is already assigned on UART0 (pins 3, 1)
     // This is also USB on modules that use DIPs
-    // Set TxUSB to TxBackpack so that data goes to the same place
-    TxUSB = TxBackpack;
+    // Set TxUSB to BackpackOrLogStrm so that data goes to the same place
+    TxUSB = BackpackOrLogStrm;
   }
   else if (GPIO_PIN_RCSIGNAL_RX == U0RXD_GPIO_NUM && GPIO_PIN_RCSIGNAL_TX == U0TXD_GPIO_NUM)
   {
@@ -1307,9 +1301,9 @@ static void setupSerial()
   else
   {
     // The backpack is on a separate UART to UART0
-    // Set TxUSB to pins 3, 1 so that we can access TxUSB and TxBackpack independantly
+    // Set TxUSB to UART0 default pins so that we can access TxUSB and BackpackOrLogStrm independantly
     TxUSB = new HardwareSerial(1);
-    ((HardwareSerial *)TxUSB)->begin(firmwareOptions.uart_baud, SERIAL_8N1, 3, 1);
+    ((HardwareSerial *)TxUSB)->begin(firmwareOptions.uart_baud, SERIAL_8N1, U0RXD_GPIO_NUM, U0TXD_GPIO_NUM);
   }
 #else
   TxUSB = new NullStream();
@@ -1322,15 +1316,18 @@ static void setupSerial()
  ***/
 static void setupTarget()
 {
+#if defined(PLATFORM_ESP32)
+  // arduino-espressif32 HardwareSerial's constructor for UART0 saves and attaches to GPIO 1 and 3, which
+  // will reset any other use of them when begin() is actually called for UART0 by CRSFHandset/SerialIO.
+  // Calling end() here, will call _uartDetachPins() on the underlying UART implementation so they won't
+  // be saved later (fixed upstream, coming someday)
+  Serial.end();
+#endif
+
   if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
   {
     pinMode(GPIO_PIN_ANT_CTRL, OUTPUT);
     digitalWrite(GPIO_PIN_ANT_CTRL, diversityAntennaState);
-  }
-  if (GPIO_PIN_ANT_CTRL_COMPL != UNDEF_PIN)
-  {
-    pinMode(GPIO_PIN_ANT_CTRL_COMPL, OUTPUT);
-    digitalWrite(GPIO_PIN_ANT_CTRL_COMPL, !diversityAntennaState);
   }
 
   setupSerial();
@@ -1339,7 +1336,6 @@ static void setupTarget()
 
 bool setupHardwareFromOptions()
 {
-#if defined(TARGET_UNIFIED_TX)
   if (!options_init())
   {
     // Register the WiFi with the framework
@@ -1349,66 +1345,91 @@ bool setupHardwareFromOptions()
     devicesRegister(wifi_device, ARRAY_SIZE(wifi_device));
     devicesInit();
 
-    connectionState = hardwareUndefined;
+    setConnectionState(hardwareUndefined);
     return false;
   }
-#else
-  options_init();
-#endif
-
   return true;
 }
 
+#if defined(M0139)
+static uint32_t psuedo_rand(uint32_t value)
+{
+  value ^= value << 13;
+  value ^= value >> 17;
+  value ^= value << 5;
+  return value;
+}
+#endif
+
 static void setupBindingFromConfig()
 {
-  // ModalAI: Make sure the UID is valid too
-  if (firmwareOptions.hasUID && UID_IS_BOUND(firmwareOptions.uid))
+  if (firmwareOptions.hasUID && OtaUidIsBound(firmwareOptions.uid))
   {
     memcpy(UID, firmwareOptions.uid, UID_LEN);
   }
   else
   {
-    // Check if a saved random UID exists in config (set by EnterUnbindMode)
-    const uint8_t *savedUID = config.GetUID();
-    bool hasSavedUID = false;
-    for (int i = 0; i < UID_LEN; i++) if (savedUID[i] != 0) { hasSavedUID = true; break; }
-
-    if (hasSavedUID)
+#if defined(PLATFORM_ESP32)
+    esp_read_mac(UID, ESP_MAC_WIFI_STA);
+#elif defined(M0139)
+    const uint8_t *savedUid = config.GetUID();
+    if (OtaUidIsBound(savedUid))
     {
-      memcpy(UID, savedUID, UID_LEN);
+      memcpy(UID, savedUid, UID_LEN);
     }
     else
     {
-#if defined(PLATFORM_ESP32)
-      esp_read_mac(UID, ESP_MAC_WIFI_STA);
-#elif defined(PLATFORM_STM32)
-      // ModalAI: Deterministic Pseudo-random ID
-      // Seed is based on the lower 64 bits of the UUID register
-      uint32_t UID_0 = HAL_GetUIDw0();
-      uint32_t UID_1 = HAL_GetUIDw1();
-      uint32_t UID_2 = HAL_GetUIDw2();
-      uint32_t seed = psuedo_rand(UID_0);
-      seed = psuedo_rand(seed ^ UID_1);
-      seed = psuedo_rand(seed ^ UID_2);
-      uint32_t UID_lower = psuedo_rand(seed);
-      uint32_t UID_upper = psuedo_rand(UID_lower);
-      UID[0] = (UID_lower & 0xFF000000) >> 24;
-      UID[1] = (UID_lower & 0x00FF0000) >> 16;
-      UID[2] = (UID_lower & 0x0000FF00) >> 8;
-      UID[3] = (UID_lower & 0x000000FF) >> 0;
-      UID[4] = (UID_upper & 0xFF000000) >> 24;
-      UID[5] = (UID_upper & 0x00FF0000) >> 16;
-#else
-      wifi_get_macaddr(STATION_IF, UID);
-#endif
+      const uint32_t uid0 = HAL_GetUIDw0();
+      const uint32_t uid1 = HAL_GetUIDw1();
+      const uint32_t uid2 = HAL_GetUIDw2();
+      uint32_t seed = psuedo_rand(uid0);
+      seed = psuedo_rand(seed ^ uid1);
+      seed = psuedo_rand(seed ^ uid2);
+      const uint32_t uidLower = psuedo_rand(seed);
+      const uint32_t uidUpper = psuedo_rand(uidLower);
+      UID[0] = (uidLower >> 24) & 0xFF;
+      UID[1] = (uidLower >> 16) & 0xFF;
+      UID[2] = (uidLower >> 8) & 0xFF;
+      UID[3] = uidLower & 0xFF;
+      UID[4] = (uidUpper >> 24) & 0xFF;
+      UID[5] = (uidUpper >> 16) & 0xFF;
     }
+#else
+    wifi_get_macaddr(STATION_IF, UID);
+#endif
   }
 
-  DBGLN("UID=(%d, %d, %d, %d, %d, %d)",
+  DBGLN("UID=(%u, %u, %u, %u, %u, %u)",
     UID[0], UID[1], UID[2], UID[3], UID[4], UID[5]);
 
   OtaUpdateCrcInitFromUid();
 }
+
+#if defined(M0139)
+void EnterUnbindMode()
+{
+  hwTimer::stop();
+  while (busyTransmitting);
+
+  uint32_t seed = psuedo_rand(millis() ^ HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2());
+  const uint32_t uidLower = psuedo_rand(seed);
+  const uint32_t uidUpper = psuedo_rand(uidLower);
+  UID[0] = (uidLower >> 24) & 0xFF;
+  UID[1] = (uidLower >> 16) & 0xFF;
+  UID[2] = (uidLower >> 8) & 0xFF;
+  UID[3] = uidLower & 0xFF;
+  UID[4] = (uidUpper >> 24) & 0xFF;
+  UID[5] = (uidUpper >> 16) & 0xFF;
+
+  config.SetUID(UID);
+  config.Commit();
+  OtaUpdateCrcInitFromUid();
+  FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+  SetRFLinkRate(config.GetRate());
+  devicesTriggerEvent(EVENT_CONFIG_UID_CHANGED);
+  hwTimer::resume();
+}
+#endif
 
 
 static void cyclePower()
@@ -1428,31 +1449,34 @@ static void cyclePower()
   }
 }
 
+static void checkSendLinkStatsToHandset(uint32_t now)
+{
+  if ((now - LinkStatsLastReported_Ms) > firmwareOptions.tlm_report_interval)
+  {
+    // If we have gone to disconnected state, keep sending the ghost linkstats for some time
+    if (RxDisconnected_Ms)
+    {
+      constexpr uint32_t LOST_NOTIFICATION_MAX_DELAY_MS = 3000U;
+      // Delay a variable amount based on the LQ. Lower LQ, lower time before we tell the handset what's up
+      uint32_t TelemetryLostCalloutDelay_Ms = map(constrain(linkStats.uplink_Link_quality, 50, 100), 50, 100, 0, LOST_NOTIFICATION_MAX_DELAY_MS);
+      if (now - RxDisconnected_Ms > TelemetryLostCalloutDelay_Ms)
+      {
+        RxDisconnected_Ms = 0;
+        linkStats.uplink_Link_quality = 0;
+      }
+    }
+
+    CRSF_MK_FRAME_T(crsfLinkStatistics_t) linkStatisticsFrame;
+    crsfRouter.makeLinkStatisticsPacket(&linkStatisticsFrame.h);
+    // the linkStats originates from the OTA connector so we don't send it back there.
+    crsfRouter.deliverMessage(&otaConnector, &linkStatisticsFrame.h);
+    sendCRSFTelemetryToBackpack((uint8_t *)&linkStatisticsFrame);
+    LinkStatsLastReported_Ms = now;
+  }
+}
+
 void setup()
 {
-  #if defined(FRSKY_R9MM) || defined(M0139)
-  HAL_Init();
-  __disable_irq();
-  #endif
-
-  #ifdef M0139
-
-  #ifdef DEBUG_RTT
-  SEGGER_RTT_Init();
-  #endif
-
-  LL_GPIO_DeInit(GPIOA);
-  LL_GPIO_InitTypeDef pin_init = {
-    .Pin=STM_LL_GPIO_PIN(digitalPinToPinName(PA9)),
-    .Mode=LL_GPIO_MODE_FLOATING,
-    .Speed=LL_GPIO_MODE_OUTPUT_50MHz,
-    .OutputType=LL_GPIO_OUTPUT_PUSHPULL,
-    .Pull=LL_GPIO_PULL_UP,
-  };
-  LL_GPIO_Init(GPIOA, &pin_init);
-
-  #endif
-
   if (setupHardwareFromOptions())
   {
     setupTarget();
@@ -1462,22 +1486,29 @@ void setup()
     devicesInit();
     DBGLN("Initialised devices");
 
+#if !defined(M0139)
+    setupBindingFromConfig();
+    FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+#endif
+
     Radio.RXdoneCallback = &RXdoneISR;
     Radio.TXdoneCallback = &TXdoneISR;
 
-    handset->registerCallbacks(UARTconnected, firmwareOptions.is_airport ? nullptr : UARTdisconnected, ModelUpdateReq, EnterBindingModeSafely);
+    crsfTransmitter.begin();
+    crsfRouter.addConnector(&otaConnector);
+    crsfRouter.addEndpoint(&crsfTransmitter);
+    crsfRouter.addConnector(&usbConnector);
+    // When a CRSF handset is detected, it will add itself to the router
 
-    DBGLN("ExpressLRS TX Module Booted...");
-
-  #ifdef M0139
-    __enable_irq();
-  #endif
+    handset->registerCallbacks(UARTconnected, firmwareOptions.is_airport ? nullptr : UARTdisconnected);
 
     eeprom.Begin(); // Init the eeprom
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load(); // Load the stored values from eeprom
+#if defined(M0139)
     setupBindingFromConfig();
-    FHSSrandomiseFHSSsequence(uidMacSeedGet());
+    FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+#endif
 
     Radio.currFreq = FHSSgetInitialFreq(); //set frequency first or an error will occur!!!
     #if defined(RADIO_SX127X)
@@ -1489,12 +1520,10 @@ void setup()
     #else
     if (GPIO_PIN_SCK != UNDEF_PIN)
     {
-      DBGLN("Init Success2");
       init_success = Radio.Begin(FHSSgetMinimumFreq(), FHSSgetMaximumFreq());
     }
     else
     {
-      DBGLN("Init Success");
       // Assume BLE Joystick mode if no radio SCK pin
       init_success = true;
     }
@@ -1502,41 +1531,33 @@ void setup()
 
     if (!init_success)
     {
-      DBGLN("Init Failed");
-      connectionState = radioFailed;
+      setConnectionState(radioFailed);
     }
     else
     {
-      DBGLN("Setting up telemetry");
-      TelemetryReceiver.SetDataToReceive(CRSFinBuffer, sizeof(CRSFinBuffer));
+      DataDlReceiver.SetDataToReceive(CRSFinBuffer, sizeof(CRSFinBuffer));
 
       POWERMGNT::init();
       DynamicPower_Init();
-      DBGLN("Initialized Power Mgmt");
 
       // Set the pkt rate, TLM ratio, and power from the stored eeprom values
       ChangeRadioParams();
-      DBGLN("Setup Radio Params");
 
-  #if defined(Regulatory_Domain_EU_CE_2400)
-      SetClearChannelAssessmentTime();
-  #endif
+      LbtCcaTimerStart();
       hwTimer::init(nullptr, timerCallback);
-      connectionState = noCrossfire;
-      DBGLN("Finished init");
+      setConnectionState(noCrossfire);
     }
   }
   else
   {
     // In the failure case we set the logging to the null logger so nothing crashes
     // if it decides to log something
-    TxBackpack = new NullStream();
+    BackpackOrLogStrm = new NullStream();
+    TxUSB = BackpackOrLogStrm;
   }
 
-#if defined(HAS_BUTTON)
   registerButtonFunction(ACTION_BIND, EnterBindingMode);
   registerButtonFunction(ACTION_INCREASE_POWER, cyclePower);
-#endif
 
   devicesStart();
 
@@ -1546,18 +1567,10 @@ void setup()
     config.SetMotionMode(0); // Ensure motion detection is off
     UARTconnected();
   }
-
-#ifdef M0139
-  __enable_irq();
-#endif
-
-  DBGLN("End Setup");
-
 }
 
 void loop()
 {
-
   uint32_t now = millis();
 
   HandleUARTout(); // Only used for non-CRSF output
@@ -1579,28 +1592,11 @@ void loop()
 
   // Not a device because it must be run on the loop core
   checkBackpackUpdate();
-
-  #if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
-    // If the reboot time is set and the current time is past the reboot time then reboot.
-    if (rebootTime != 0 && now > rebootTime) {
-      ESP.restart();
-    }
-  #endif
+  checkRebootTime(now);
 
   executeDeferredFunction(micros());
 
   HandleUARTin();
-
-  // Unnecessary, use #define DEBUG_TX_FREERUN instead
-  #if defined(HWIL_TESTING) && !defined(DEBUG_TX_FREERUN) 
-  // Hack to ignore the lack of a crossfire connection
-  if(connectionState == noCrossfire)
-  {
-    handset->forceConnection();
-    //connectionState = awaitingModelId;
-    //hwTimer::resume();
-  }
-  #endif
 
   if (connectionState > MODE_STATES)
   {
@@ -1611,33 +1607,21 @@ void loop()
   CheckConfigChangePending();
   DynamicPower_Update(now);
   VtxPitmodeSwitchUpdate();
+  checkSendLinkStatsToHandset(now);
 
-  /* Send TLM updates to handset if connected + reporting period
-   * is elapsed. This keeps handset happy dispite of the telemetry ratio */
-  if ((connectionState == connected) && (LastTLMpacketRecvMillis != 0) &&
-      (now >= (uint32_t)(firmwareOptions.tlm_report_interval + TLMpacketReported)))
-  {
-    uint8_t linkStatisticsFrame[CRSF_FRAME_NOT_COUNTED_BYTES + CRSF_FRAME_SIZE(sizeof(crsfLinkStatistics_t))];
-
-    CRSFHandset::makeLinkStatisticsPacket(linkStatisticsFrame);
-    handset->sendTelemetryToTX(linkStatisticsFrame);
-    sendCRSFTelemetryToBackpack(linkStatisticsFrame);
-    TLMpacketReported = now;
-  }
-
-  if (TelemetryReceiver.HasFinishedData())
+  if (DataDlReceiver.HasFinishedData())
   {
       if (CRSFinBuffer[0] == CRSF_ADDRESS_USB)
       {
         if (config.GetLinkMode() == TX_MAVLINK_MODE)
         {
-          // raw mavlink data - forward to USB rather than handset
-          uint8_t count = CRSFinBuffer[1];
-          // Convert to CRSF telemetry where we can
-          convert_mavlink_to_crsf_telem(CRSFinBuffer, count, handset);
+          const uint8_t count = CRSFinBuffer[CRSF_TELEMETRY_LENGTH_INDEX];
+          // Convert to CRSF telemetry where we can and send to handset
+          convert_mavlink_to_crsf_telem(CRSF_ADDRESS_RADIO_TRANSMITTER, CRSFinBuffer, count);
+          // forward raw mavlink data to USB
           TxUSB->write(CRSFinBuffer + CRSF_FRAME_NOT_COUNTED_BYTES, count);
-          // If we have a backpack
-          if (TxUSB != TxBackpack)
+          // And to the backpack if we have one
+          if (TxUSB != BackpackOrLogStrm)
           {
             sendMAVLinkTelemetryToBackpack(CRSFinBuffer);
           }
@@ -1645,21 +1629,20 @@ void loop()
       }
       else
       {
-        // Send all other tlm to handset
-        handset->sendTelemetryToTX(CRSFinBuffer);
+        // Send all other tlm to CRSF router
+        crsfRouter.processMessage(&otaConnector, (crsf_header_t *)CRSFinBuffer);
         sendCRSFTelemetryToBackpack(CRSFinBuffer);
       }
-      TelemetryReceiver.Unlock();
+      DataDlReceiver.Unlock();
   }
 
-  // only send msp data when binding is not active
-  static bool mspTransferActive = false;
+  // only send Uplink data when binding is not active
   if (InBindingMode)
   {
 #if defined(RADIO_LR1121)
     // Send half of the bind packets on the 2.4GHz domain
     if (BindingSendCount == BindingSpamAmount / 2) {
-      SetRFLinkRate(RATE_DUALBAND_BINDING);
+      SetRFLinkRate(enumRatetoIndexSafe(RATE_DUALBAND_BINDING));
       // Increment BindingSendCount so that SetRFLinkRate is only called once.
       BindingSendCount++;
     }
@@ -1669,48 +1652,8 @@ void loop()
       ExitBindingMode();
     }
   }
-  else if (!MspSender.IsActive())
+  else if (!DataUlSender.IsActive())
   {
-    // sending is done and we need to update our flag
-    if (mspTransferActive)
-    {
-      // unlock buffer for msp messages
-      CRSF::UnlockMspMessage();
-      mspTransferActive = false;
-    }
-    // we are not sending so look for next msp package
-    else
-    {
-      uint8_t* mspData;
-      uint8_t mspLen;
-      CRSF::GetMspMessage(&mspData, &mspLen);
-      // if we have a new msp package start sending
-      if (mspData != nullptr)
-      {
-        MspSender.SetDataToTransmit(mspData, mspLen);
-        mspTransferActive = true;
-      }
-    }
-  }
-
-  if (config.GetLinkMode() == TX_MAVLINK_MODE)
-  {
-    // Use MspSender for MAVLINK uplink data
-    uint8_t *nextPayload = 0;
-    uint8_t nextPlayloadSize = 0;
-    uint16_t count = uartInputBuffer.size();
-    if (count > 0 && !MspSender.IsActive())
-    {
-        count = std::min(count, (uint16_t)CRSF_PAYLOAD_SIZE_MAX);
-        mavlinkSSBuffer[0] = MSP_ELRS_MAVLINK_TLM; // Used on RX to differentiate between std msp opcodes and mavlink
-        mavlinkSSBuffer[1] = count;
-        // Following n bytes are just raw mavlink
-        uartInputBuffer.lock();
-        uartInputBuffer.popBytes(mavlinkSSBuffer + CRSF_FRAME_NOT_COUNTED_BYTES, count);
-        uartInputBuffer.unlock();
-        nextPayload = mavlinkSSBuffer;
-        nextPlayloadSize = count + CRSF_FRAME_NOT_COUNTED_BYTES;
-        MspSender.SetDataToTransmit(nextPayload, nextPlayloadSize);
-    }
+    otaConnector.pumpSender();
   }
 }

@@ -8,9 +8,3 @@ src/.vscode
 src/data/*.ini
 src/data/*.json
 src/hardware
-.vscode
-*.bin
-RTT/
-src/artifacts
-!src/hardware/targets.json
-.platformio

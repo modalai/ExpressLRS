@@ -3,6 +3,11 @@
 #include "options.h"
 #include <string.h>
 
+#if defined(UNIT_TEST)
+#define POWER_OUTPUT_VALUES_COUNT 4
+#define POWER_OUTPUT_VALUES_DUAL_COUNT 0
+#endif
+
 #if defined(RADIO_SX127X) || defined(RADIO_LR1121)
 
 #if defined(RADIO_LR1121)
@@ -14,7 +19,7 @@
 const fhss_config_t domains[] = {
     {"AU915",  FREQ_HZ_TO_REG_VAL(915500000), FREQ_HZ_TO_REG_VAL(926900000), 20, 921000000},
     {"FCC915", FREQ_HZ_TO_REG_VAL(903500000), FREQ_HZ_TO_REG_VAL(926900000), 40, 915000000},
-    {"EU868",  FREQ_HZ_TO_REG_VAL(865275000), FREQ_HZ_TO_REG_VAL(869575000), 13, 868000000},
+    {"EU868",  FREQ_HZ_TO_REG_VAL(863275000), FREQ_HZ_TO_REG_VAL(869575000), 13, 868000000},
     {"IN866",  FREQ_HZ_TO_REG_VAL(865375000), FREQ_HZ_TO_REG_VAL(866950000), 4, 866000000},
     {"AU433",  FREQ_HZ_TO_REG_VAL(433420000), FREQ_HZ_TO_REG_VAL(434420000), 3, 434000000},
     {"EU433",  FREQ_HZ_TO_REG_VAL(433100000), FREQ_HZ_TO_REG_VAL(434450000), 3, 434000000},
@@ -24,7 +29,13 @@ const fhss_config_t domains[] = {
 
 #if defined(RADIO_LR1121)
 const fhss_config_t domainsDualBand[] = {
-    {"ISM2G4", FREQ_HZ_TO_REG_VAL(2400400000), FREQ_HZ_TO_REG_VAL(2479400000), 80, 2440000000}
+    {
+    #if defined(Regulatory_Domain_EU_CE_2400)
+        "CE_LBT",
+    #else
+        "ISM2G4",
+    #endif
+    FREQ_HZ_TO_REG_VAL(2400400000), FREQ_HZ_TO_REG_VAL(2479400000), 80, 2440000000}
 };
 #endif
 
@@ -42,18 +53,18 @@ const fhss_config_t domains[] = {
 };
 #endif
 
+// Our table of FHSS frequencies. Define a regulatory domain to select the correct set for your location and radio
+const fhss_config_t *FHSSconfig;
+const fhss_config_t *FHSSconfigDualBand;
+
 #if defined(CUSTOM_DOMAIN_ENABLE)
-fhss_config_t CustomFHSSConfig;
+static fhss_config_t customFHSSConfig;
 
 fhss_config_t FHSSgetInitialDomain()
 {
     return domains[firmwareOptions.domain];
 }
 #endif
-
-// Our table of FHSS frequencies. Define a regulatory domain to select the correct set for your location and radio
-const fhss_config_t *FHSSconfig;
-const fhss_config_t *FHSSconfigDualBand;
 
 // Actual sequence of hops as indexes into the frequency list
 uint8_t FHSSsequence[FHSS_SEQUENCE_LEN];
@@ -81,55 +92,51 @@ bool FHSSuseDualBand = false;
 uint16_t primaryBandCount;
 uint16_t secondaryBandCount;
 
+constexpr uint8_t VERSION_DOMAIN_MAXLEN = 26 + 1;   // max. number of characters (plus '\0') the Lua script can display
+                                                    // on color LCD radios w/o being overwritten by the commit info
+char version_domain[VERSION_DOMAIN_MAXLEN] {};
+
+
 void FHSSrandomiseFHSSsequence(const uint32_t seed)
 {
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    if (FHSSuseConfiguredCustomDomain()) {
-
-        CustomFHSSConfig = FHSSgetConfiguredCustomDomain();
-        FHSSconfig = &CustomFHSSConfig;
-        sync_channel = (FHSSconfig->freq_count / 2) + 1;
-        freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);
-        primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
-
-        DBGLN("Setting %s Mode", FHSSconfig->domain);
-        DBGLN("Number of FHSS frequencies = %u", FHSSconfig->freq_count);
-        DBGLN("Sync channel = %u", sync_channel);
-
-        FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
-
-    // No dual-band supported custom mode yet
-    } else {
-#endif
+    if (FHSSuseConfiguredCustomDomain())
+    {
+        customFHSSConfig = FHSSgetConfiguredCustomDomain();
+        FHSSconfig = &customFHSSConfig;
+    }
+    else
+    {
+        FHSSconfig = &domains[firmwareOptions.domain];
+    }
+#else
     FHSSconfig = &domains[firmwareOptions.domain];
-    sync_channel = (FHSSconfig->freq_count / 2) + 1;
+#endif
+    sync_channel = FHSSconfig->freq_count / 2;
     freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);
     primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
 
-    DBGLN("Setting %s Mode", FHSSconfig->domain);
-    DBGLN("Number of FHSS frequencies = %u", FHSSconfig->freq_count);
-    DBGLN("Sync channel = %u", sync_channel);
+    DBGLN("Primary Domain %s, %u channels, sync=%u",
+        FHSSconfig->domain, FHSSconfig->freq_count, sync_channel);
 
     FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
 
 #if defined(RADIO_LR1121)
     FHSSconfigDualBand = &domainsDualBand[0];
-    sync_channel_DualBand = (FHSSconfigDualBand->freq_count / 2) + 1;
+    sync_channel_DualBand = FHSSconfigDualBand->freq_count / 2;
     freq_spread_DualBand = (FHSSconfigDualBand->freq_stop - FHSSconfigDualBand->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfigDualBand->freq_count - 1);
     secondaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfigDualBand->freq_count) * FHSSconfigDualBand->freq_count;
 
-    DBGLN("Setting Dual Band %s Mode", FHSSconfigDualBand->domain);
-    DBGLN("Number of FHSS frequencies = %u", FHSSconfigDualBand->freq_count);
-    DBGLN("Sync channel Dual Band = %u", sync_channel_DualBand);
+    DBGLN("Dual Domain %s, %u channels, sync=%u",
+        FHSSconfigDualBand->domain, FHSSconfigDualBand->freq_count, sync_channel_DualBand);
 
     FHSSusePrimaryFreqBand = false;
     FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfigDualBand->freq_count, sync_channel_DualBand, FHSSsequence_DualBand);
     FHSSusePrimaryFreqBand = true;
 #endif
 
-#if defined(CUSTOM_DOMAIN_ENABLE)
-    } // end else
-#endif
+    // add frequency and regulatory domain to the string used by the Lua script
+    addDomainInfo(version_domain, VERSION_DOMAIN_MAXLEN);
 }
 
 /**
@@ -179,16 +186,56 @@ void FHSSrandomiseFHSSsequenceBuild(const uint32_t seed, uint32_t freqCount, uin
     }
 
     // output FHSS sequence
-    for (uint16_t i=0; i < FHSSgetSequenceCount(); i++)
-    {
-        DBG("%u ",inSequence[i]);
-        if (i % 10 == 9)
-            DBGCR;
-    }
-    DBGCR;
+    // for (uint16_t i=0; i < FHSSgetSequenceCount(); i++)
+    // {
+    //     DBG("%u ",inSequence[i]);
+    //     if (i % 10 == 9)
+    //         DBGCR;
+    // }
+    // DBGCR;
 }
 
-bool isDomain868()
+/**
+ * @brief Add frequency and regulatory domain to the version string used by the Lua script. Outputs the version_domain string as:
+ * [version:0..20] [subGHz domain | 2.4GHz domain] truncated to maxlen-1 for single band devices
+ * [version:0..20] [subGHz domain]/[2.4GHz domain] truncated to maxlen-1 for dual band devices
+ * Examples:
+ *   4.0.0 CE_LBT
+ *   4.1.7 AU915
+ *   4.11.17 FCC915/ISM2G4
+ *   someBranch EU868/CE_LBT
+ *
+ * @param version_domain a pointer to a buffer holding the version and extra space for additional data
+ * @param maxlen the size of the provided buffer
+ */
+void addDomainInfo(char *version_domain, uint8_t maxlen)
 {
-    return strcmp(FHSSconfig->domain, "EU868") == 0;
+    if (strlen(version) < 21)
+    {
+        strlcpy(version_domain, version, 21);
+        strlcat(version_domain, " ", maxlen);
+    }
+    else
+    {
+        strlcpy(version_domain, version, 18);
+        strlcat(version_domain, "... ", maxlen);
+    }
+
+    if (POWER_OUTPUT_VALUES_COUNT != 0)
+    {
+        strlcat(version_domain, FHSSconfig->domain, maxlen);            // single band: subghz or 2.4GHz, dual band: subghz
+    }
+    if (POWER_OUTPUT_VALUES_COUNT != 0 && POWER_OUTPUT_VALUES_DUAL_COUNT != 0)
+    {
+        strlcat(version_domain, "/", maxlen);
+    }
+    if (POWER_OUTPUT_VALUES_DUAL_COUNT != 0)
+    {
+        strlcat(version_domain, FHSSconfigDualBand->domain, maxlen);    // 2.4GHz
+    }
+}
+
+bool isUsingPrimaryFreqBand()
+{
+    return FHSSusePrimaryFreqBand;
 }

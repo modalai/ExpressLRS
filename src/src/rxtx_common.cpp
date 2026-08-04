@@ -4,10 +4,7 @@
 #include "logging.h"
 
 #include <functional>
-
-#if defined(USE_I2C)
 #include <Wire.h>
-#endif
 
 static const int maxDeferredFunctions = 3;
 
@@ -24,25 +21,14 @@ static deferred_t deferred[maxDeferredFunctions] = {
 };
 
 boolean i2c_enabled = false;
+static unsigned long rebootTime_Ms = 0;
 
 static void setupWire()
 {
-#if defined(USE_I2C)
-
-#if defined(PLATFORM_STM32)
-    if(GPIO_PIN_SDA != UNDEF_PIN && GPIO_PIN_SCL != UNDEF_PIN)
-    {
-        // Wire::begin() passing ints is ambiguously overloaded, use the set functions
-        // which themselves might get the PinName overloads
-        Wire.setSCL(GPIO_PIN_SCL);
-        Wire.setSDA(GPIO_PIN_SDA);
-        Wire.begin();
-    }
-#else
     int gpio_scl = GPIO_PIN_SCL;
     int gpio_sda = GPIO_PIN_SDA;
 
-#if defined(TARGET_RX) && defined(GPIO_PIN_PWM_OUTPUTS)
+#if defined(TARGET_RX)
     for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
     {
         auto pin = GPIO_PIN_PWM_OUTPUTS[ch];
@@ -74,8 +60,6 @@ static void setupWire()
         Wire.setClock(400000);
         i2c_enabled = true;
     }
-#endif
-#endif
 }
 
 void setupTargetCommon()
@@ -110,5 +94,29 @@ void executeDeferredFunction(unsigned long now)
             deferred[i].function();
             deferred[i].function = nullptr;
         }
+    }
+}
+
+/***
+ * @brief Set a time in milliseconds to reboot the MCU from the main loop thread
+ * */
+void scheduleRebootTime(unsigned long inMs)
+{
+    rebootTime_Ms = millis() + inMs;
+}
+
+/**
+ * @brief Call from the main thread to check if it is time to reboot. May not return.
+ */
+void checkRebootTime(unsigned long now)
+{
+    // If the reboot time is set and the current time is past the reboot time then reboot.
+    // Wait for any pending config change to be committed first
+    if (rebootTime_Ms != 0 && !config.IsModified() && now > rebootTime_Ms ) {
+#if defined(PLATFORM_STM32)
+        NVIC_SystemReset();
+#else
+        ESP.restart();
+#endif
     }
 }

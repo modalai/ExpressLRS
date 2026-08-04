@@ -1,7 +1,8 @@
 #include "OLED/oleddisplay.h"
 #include "TFT/tftdisplay.h"
 
-#include "common.h"
+#include "TXModuleEndpoint.h"
+#include "rxtx_intf.h"
 #include "config.h"
 #include "helpers.h"
 #include "logging.h"
@@ -10,11 +11,9 @@
 #include "OTA.h"
 #include "deferred.h"
 
-#ifdef HAS_THERMAL
 #include "thermal.h"
 #define UPDATE_TEMP_TIMEOUT 5000
 extern Thermal thermal;
-#endif
 
 extern FiniteStateMachine state_machine;
 
@@ -24,15 +23,12 @@ extern bool VRxBackpackWiFiReadyToSend;
 extern void VtxTriggerSend();
 extern void ResetPower();
 extern void setWifiUpdateMode();
-extern void SetSyncSpam();
 extern uint8_t adjustPacketRateForBaud(uint8_t rate);
 extern uint8_t adjustSwitchModeForAirRate(OtaSwitchMode_e eSwitchMode, uint8_t packetSize);
 
 extern Display *display;
 
-#ifdef PLATFORM_ESP32
 extern unsigned long rebootTime;
-#endif
 
 fsm_state_t getInitialState()
 {
@@ -63,7 +59,6 @@ static void displayIdleScreen(bool init)
     static uint8_t last_run_power = 0xFF;
 
     uint8_t temperature = last_temperature;
-#ifdef HAS_THERMAL
     static uint32_t last_update_temp_ms = 0;
     uint32_t now = millis();
     if(now - last_update_temp_ms > UPDATE_TEMP_TIMEOUT || last_update_temp_ms == 0)
@@ -71,13 +66,12 @@ static void displayIdleScreen(bool init)
         temperature = thermal.getTempValue();
         last_update_temp_ms = now;
     }
-#endif
 
     uint8_t changed = init ? CHANGED_ALL : 0;
     message_index_t disp_message;
     if (connectionState == noCrossfire || connectionState > FAILURE_STATES) {
         disp_message = MSG_ERROR;
-    } else if(handset->IsArmed()) {
+    } else if(isArmed) {
         disp_message = MSG_ARMED;
     } else if(connectionState == connected) {
         if (connectionHasModelMatch) {
@@ -235,43 +229,17 @@ static void saveValueIndex(bool init)
     auto val = values_index;
     switch (state_machine.getParentState())
     {
-        case STATE_PACKET: {
-            uint8_t actualRate = adjustPacketRateForBaud(val);
-            uint8_t newSwitchMode = adjustSwitchModeForAirRate(
-                (OtaSwitchMode_e)config.GetSwitchMode(), get_elrs_airRateConfig(actualRate)->PayloadLength);
-            // If the switch mode is going to change, block the change while connected
-            if (newSwitchMode == OtaSwitchModeCurrent || connectionState == disconnected)
-            {
-                deferExecutionMillis(100, [actualRate, newSwitchMode](){
-                    config.SetRate(actualRate);
-                    config.SetSwitchMode(newSwitchMode);
-                    OtaUpdateSerializers((OtaSwitchMode_e)newSwitchMode, ExpressLRS_currAirRate_Modparams->PayloadLength);
-                    SetSyncSpam();
-                });
-            }
+        case STATE_PACKET:
+            crsfTransmitter.SetPacketRateIdx(val, false);
             break;
-        }
-        case STATE_SWITCH: {
-            // Only allow changing switch mode when disconnected since we need to guarantee
-            // the pack and unpack functions are matched
-            if (connectionState == disconnected)
-            {
-                deferExecutionMillis(100, [val](){
-                    config.SetSwitchMode(val);
-                    OtaUpdateSerializers((OtaSwitchMode_e)val, ExpressLRS_currAirRate_Modparams->PayloadLength);
-                    SetSyncSpam();
-                });
-            }
+        case STATE_SWITCH:
+            crsfTransmitter.SetSwitchMode(val);
             break;
-        }
         case STATE_ANTENNA:
-            config.SetAntennaMode(values_index);
+            crsfTransmitter.SetAntennaMode(val);
             break;
         case STATE_TELEMETRY:
-            deferExecutionMillis(100, [val](){
-                config.SetTlm(val);
-                SetSyncSpam();
-            });
+            crsfTransmitter.SetTlmRatio(val);
             break;
         case STATE_POWERSAVE:
             config.SetMotionMode(values_index);
@@ -281,15 +249,10 @@ static void saveValueIndex(bool init)
             break;
 
         case STATE_POWER_MAX:
-            config.SetPower(values_index);
-            if (!config.IsModified())
-            {
-                ResetPower();
-            }
+            crsfTransmitter.SetPowerMax(val);
             break;
         case STATE_POWER_DYNAMIC:
-            config.SetDynamicPower(values_index > 0);
-            config.SetBoostChannel((values_index - 1) > 0 ? values_index - 1 : 0);
+            crsfTransmitter.SetDynamicPower(val);
             break;
 
         case STATE_VTX_BAND:
@@ -342,7 +305,7 @@ static void executeBLE(bool init)
 {
     if (init)
     {
-        connectionState = bleJoystick;
+        setConnectionState(bleJoystick);
         display->displayBLEStatus();
     }
     else
@@ -356,11 +319,9 @@ static void executeBLE(bool init)
 
 static void exitBLE(bool init)
 {
-#ifdef PLATFORM_ESP32
     if (connectionState == bleJoystick) {
-        rebootTime = millis() + 200;
+        scheduleRebootTime(200);
     }
-#endif
 }
 
 // WiFi
@@ -371,11 +332,9 @@ static void displayWiFiConfirm(bool init)
 
 static void exitWiFi(bool init)
 {
-#ifdef PLATFORM_ESP32
     if (connectionState == wifiUpdate) {
-        rebootTime = millis() + 200;
+        scheduleRebootTime(200);
     }
-#endif
 }
 
 static void executeWiFi(bool init)
@@ -386,9 +345,7 @@ static void executeWiFi(bool init)
         switch (state_machine.getParentState())
         {
             case STATE_WIFI_TX:
-#if defined(PLATFORM_ESP32) || defined(PLATFORM_ESP8266)
                 setWifiUpdateMode();
-#endif
                 break;
             case STATE_WIFI_RX:
                 RxWiFiReadyToSend = true;
@@ -584,14 +541,10 @@ fsm_state_entry_t const wifi_ext_menu_fsm[] = {
 };
 fsm_state_event_t const wifi_ext_menu_events[] = {MENU_EVENTS(wifi_ext_menu_fsm)};
 fsm_state_entry_t const wifi_menu_fsm[] = {
-#if defined(PLATFORM_ESP32)
     {STATE_WIFI_TX, nullptr, displayMenuScreen, 20000, wifi_menu_update_events, ARRAY_SIZE(wifi_menu_update_events)},
-#endif
     {STATE_WIFI_RX, nullptr, displayMenuScreen, 20000, wifi_ext_menu_events, ARRAY_SIZE(wifi_ext_menu_events)},
-#if defined(USE_TX_BACKPACK)
     {STATE_WIFI_BACKPACK, [](){return OPT_USE_TX_BACKPACK;}, displayMenuScreen, 20000, wifi_ext_menu_events, ARRAY_SIZE(wifi_ext_menu_events)},
     {STATE_WIFI_VRX, [](){return OPT_USE_TX_BACKPACK;}, displayMenuScreen, 20000, wifi_ext_menu_events, ARRAY_SIZE(wifi_ext_menu_events)},
-#endif
     {STATE_LAST}
 };
 
@@ -618,16 +571,12 @@ fsm_state_event_t const wifi_menu_events[] = {MENU_EVENTS(wifi_menu_fsm)};
 
 fsm_state_entry_t const main_menu_fsm[] = {
     {STATE_PACKET, nullptr, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
-    {STATE_SWITCH, nullptr, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
+    {STATE_TELEMETRY, [](){return !firmwareOptions.is_airport && config.GetLinkMode() != TX_MAVLINK_MODE;}, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
+    {STATE_SWITCH, [](){return !firmwareOptions.is_airport && config.GetLinkMode() != TX_MAVLINK_MODE;}, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
     {STATE_ANTENNA, [](){return isDualRadio();}, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
     {STATE_POWER, nullptr, displayMenuScreen, 20000, power_menu_events, ARRAY_SIZE(power_menu_events)},
-    {STATE_TELEMETRY, [](){return !firmwareOptions.is_airport;}, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
-#ifdef HAS_GSENSOR
     {STATE_POWERSAVE, [](){return OPT_HAS_GSENSOR && !firmwareOptions.is_airport;}, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
-#endif // HAS_GSENSOR
-#ifdef HAS_THERMAL
     {STATE_SMARTFAN, [](){return OPT_HAS_THERMAL;}, displayMenuScreen, 20000, value_menu_events, ARRAY_SIZE(value_menu_events)},
-#endif
     {STATE_JOYSTICK, nullptr, displayMenuScreen, 20000, ble_menu_events, ARRAY_SIZE(ble_menu_events)},
     {STATE_BIND, nullptr, displayMenuScreen, 20000, bind_menu_events, ARRAY_SIZE(bind_menu_events)},
     {STATE_WIFI, nullptr, displayMenuScreen, 20000, wifi_menu_events, ARRAY_SIZE(wifi_menu_events)},
@@ -665,7 +614,6 @@ fsm_state_entry_t const entry_fsm[] = {
     {STATE_LAST}
 };
 
-#if defined(PLATFORM_ESP32)
 void jumpToWifiRunning()
 {
     state_machine.jumpTo(wifi_menu_fsm, STATE_WIFI_TX);
@@ -677,4 +625,3 @@ void jumpToBleRunning()
     state_machine.jumpTo(main_menu_fsm, STATE_JOYSTICK);
     state_machine.jumpTo(ble_menu_fsm, STATE_BLE_EXECUTE);
 }
-#endif

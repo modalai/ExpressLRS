@@ -1,9 +1,8 @@
 #ifndef DEBUG_H
 #define DEBUG_H
 
-
 #include "VA_OPT.h"
-#ifdef DEBUG_RTT
+#if defined(DEBUG_RTT)
 #include "SEGGER_RTT.h"
 #endif
 
@@ -20,7 +19,7 @@
 
 // DEBUG_LOG_VERBOSE and DEBUG_RX_SCOREBOARD implies DEBUG_LOG
 #if !defined(DEBUG_LOG)
-  #if defined(DEBUG_LOG_VERBOSE) || (defined(DEBUG_RX_SCOREBOARD) && TARGET_RX) || defined(DEBUG_INIT) || defined(DEBUG_RTT)
+  #if defined(DEBUG_LOG_VERBOSE) || (defined(DEBUG_RX_SCOREBOARD) && TARGET_RX) || defined(DEBUG_INIT)
     #define DEBUG_LOG
   #endif
 #endif
@@ -29,22 +28,17 @@
 #define DEBUG_ENABLED
 #endif
 
-#if defined(TARGET_TX)
-extern Stream *TxBackpack;
-#if defined(PLATFORM_ESP32_S3)
+extern Stream *BackpackOrLogStrm;
+#if defined(TARGET_TX) && defined(PLATFORM_ESP32_S3)
 #define LOGGING_UART (Serial)
 #else
-#define LOGGING_UART (*TxBackpack)
-#endif
-#else
-extern Stream *SerialLogger;
-#define LOGGING_UART (*SerialLogger)
+#define LOGGING_UART (*BackpackOrLogStrm)
 #endif
 
 // #define LOG_USE_PROGMEM
 
 void debugPrintf(const char* fmt, ...);
-#if defined(LOG_INIT)
+#if defined(DEBUG_INIT)
 void debugCreateInitLogger();
 void debugFreeInitLogger();
 #else
@@ -52,7 +46,9 @@ void debugFreeInitLogger();
 #define debugFreeInitLogger()
 #endif
 
-#if defined(CRITICAL_FLASH) || ((defined(DEBUG_RCVR_LINKSTATS)) && !defined(DEBUG_LOG))
+#if defined(DEBUG_RTT) && defined(DEBUG_LOG)
+  #define ERRLN(msg, ...) DBGLN("ERROR: " msg, ##__VA_ARGS__)
+#elif defined(DEBUG_RCVR_LINKSTATS) && !defined(DEBUG_LOG)
   #define ERRLN(msg, ...)
 #else
   #define ERRLN(msg, ...) IFNE(__VA_ARGS__)({ \
@@ -62,42 +58,25 @@ void debugFreeInitLogger();
   },LOGGING_UART.println("ERROR: " msg))
 #endif
 
-#if defined(DEBUG_LOG) && defined(M0139) && defined(DEBUG_RTT)
-    #define DBG(msg, ...)   debugPrintf(msg, ##__VA_ARGS__)
-    #define DBGLN(msg, ...) do { \
-      SEGGER_RTT_printf(0, msg, ##__VA_ARGS__); \
-      SEGGER_RTT_Write(0, "\n", 1); \
-    } while(0)
-    #define DBGCR SEGGER_RTT_Write(0, "\n", 1);
-    #define DBGW(c) SEGGER_RTT_PutChar(0, c);
-
-  // Verbose logging is for spammy stuff
-  #if defined(DEBUG_LOG_VERBOSE)
-    #define DBGVCR DBGCR
-    #define DBGVW(c) DBGW(c)
-    #define DBGV(...) DBG(__VA_ARGS__)
-    #define DBGVLN(...) DBGLN(__VA_ARGS__)
+#if defined(DEBUG_LOG)
+  #if defined(DEBUG_RTT)
+    #define DBGCR   SEGGER_RTT_Write(0, "\n", 1)
+    #define DBGW(c) SEGGER_RTT_PutChar(0, c)
   #else
-    #define DBGVCR
-    #define DBGVW(c)
-    #define DBGV(...)
-    #define DBGVLN(...)
+    #define DBGCR   LOGGING_UART.println()
+    #define DBGW(c) LOGGING_UART.write(c)
   #endif
-
-#elif defined(DEBUG_LOG) && !defined(CRITICAL_FLASH)
-  #define DBGCR   LOGGING_UART.println()
-  #define DBGW(c) LOGGING_UART.write(c)
   #ifndef LOG_USE_PROGMEM
     #define DBG(msg, ...)   debugPrintf(msg, ##__VA_ARGS__)
     #define DBGLN(msg, ...) do { \
       debugPrintf(msg, ##__VA_ARGS__); \
-      LOGGING_UART.println(); \
+      DBGCR; \
     } while(0)
   #else
     #define DBG(msg, ...)   debugPrintf(PSTR(msg), ##__VA_ARGS__)
     #define DBGLN(msg, ...) { \
       debugPrintf(PSTR(msg), ##__VA_ARGS__); \
-      LOGGING_UART.println(); \
+      DBGCR; \
     }
   #endif
 

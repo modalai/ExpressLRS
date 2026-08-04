@@ -1,264 +1,140 @@
 #!/usr/bin/env bash
 
-# Versioning info: 
-# https://www.expresslrs.org/quick-start/receivers/firmware-version/#receiver-firmware-version 
-# https://semver.org/
-MAJOR_VERSION=3
-MINOR_VERSION=5
-PATCH_VERSION=3
+set -euo pipefail
 
-# Find the highest MODALAI_VERSION for this MAJOR.MINOR.PATCH combination
-MODALAI_TAGS=$(git tag --list | grep "^${MAJOR_VERSION}\.${MINOR_VERSION}\.${PATCH_VERSION}\." | sort -V)
-if [ -n "$MODALAI_TAGS" ]; then
-    # Get the last (highest) tag and extract the MODALAI_VERSION
-    HIGHEST_MODALAI_TAG=$(echo "$MODALAI_TAGS" | tail -1)
-    export MODALAI_VERSION=${HIGHEST_MODALAI_TAG##*.}
-    echo "Found MODALAI tags for ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}, using MODALAI_VERSION=$MODALAI_VERSION"
-else
-    export MODALAI_VERSION=0
-    echo "No MODALAI tags found for ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}, using MODALAI_VERSION=0"
-fi
-
-FORMAT_MAJOR=$(printf %02d $MAJOR_VERSION)
-FORMAT_MINOR=$(printf %02d $MINOR_VERSION)
-FORMAT_PATCH=$(printf %02d $PATCH_VERSION)
-export ELRS_VER="0x${FORMAT_MAJOR}${FORMAT_MINOR}${FORMAT_PATCH}00"
-ENCRYPT=0
-FACTORY=0
-TARGET=""
+BASE_VERSION="4.1.0"
+MODALAI_REVISION=""
+TARGET_ALIAS=""
 ENCRYPT_KEY=""
-FACTORY_BOOT_ENV=""
-FACTORY_BOOT_BIN=""
-FACTORY_FLASH_BASE=0x08000000
-FACTORY_APP_OFFSET=0x2400
-FACTORY_APP_MAX_SIZE=98304
-FACTORY_FLASH_SIZE=$((FACTORY_APP_OFFSET + FACTORY_APP_MAX_SIZE))
+BUILD_FACTORY=0
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-print_usage () {
-	echo ""
-	echo "Build script for building ExpressLRS firmware"
-    echo "Args:"
-    echo -e "   e) Enable encryption of firmware (pass in the key)"
-    echo -e "   t) Target to build (m0184_rx, m0193_rx, m0193_tx, BETAFPV_900_RX)"
-    echo -e "   v) Version of firmware being built"
-    echo -e "   --factory Build a factory S-record image for ModalAI STM32 targets"
+cd "$SCRIPT_DIR"
+
+usage()
+{
+    echo "Build one ModalAI ExpressLRS v4 artifact."
+    echo "Usage: ./build.sh -t TARGET [-v REVISION] [-e KEY] [--factory]"
+    echo "Use a target such as m0184_rx, m0193_tx_jlink, or m0184_hwil_rx."
 }
 
-while [ $# -gt 0 ]; do
+while [ "$#" -gt 0 ]; do
     case "$1" in
-        "-h"|"--help")
-            print_usage
+        -h|--help)
+            usage
             exit 0
             ;;
-        "-e")
-            if [ $# -lt 2 ]; then
-                echo "Missing value for -e"
-                print_usage
-                exit 1
-            fi
-            ENCRYPT_KEY=${2}
-            ENCRYPT=1
-            echo "Using encryption"
+        -t)
+            [ "$#" -ge 2 ] || { echo "The -t option requires a target." >&2; exit 1; }
+            TARGET_ALIAS="$2"
             shift 2
             ;;
-        "-v")
-            if [ $# -lt 2 ]; then
-                echo "Missing value for -v"
-                print_usage
-                exit 1
-            fi
-            MODALAI_VERSION=${2}
-            echo "Using version #: $MODALAI_VERSION"
+        -v)
+            [ "$#" -ge 2 ] || { echo "The -v option requires a revision." >&2; exit 1; }
+            MODALAI_REVISION="$2"
             shift 2
             ;;
-        "-t")
-            if [ $# -lt 2 ]; then
-                echo "Missing value for -t"
-                print_usage
-                exit 1
-            fi
-            TARGET=${2}
-            echo "Building target: $TARGET"
+        -e)
+            [ "$#" -ge 2 ] || { echo "The -e option requires a key." >&2; exit 1; }
+            ENCRYPT_KEY="$2"
             shift 2
             ;;
-        "--factory")
-            FACTORY=1
-            echo "Building factory image"
+        --factory)
+            BUILD_FACTORY=1
             shift
             ;;
         *)
-            echo "invalid option $1"
-            print_usage
+            echo "Unknown option: $1" >&2
+            usage
             exit 1
             ;;
     esac
 done
 
-case $TARGET in
-    "m0184_rx"|"M0184")
-        TARGET="MODALAI_M0184_RX_via_UART"
-        FW="MODALAI_M0184_RX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MRX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mrx_bootloader.bin"
-        ;;
-    "m0184_tx"|"M0184_TX")
-        TARGET="MODALAI_M0184_TX_via_UART"
-        FW="MODALAI_M0184_TX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MTX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mtx_bootloader.bin"
-        ;;
-    "m0184_hwil_tx"|"M0184_HWIL_TX")
-        TARGET="MODALAI_M0184_HWIL_TX_via_UART"
-        FW="MODALAI_M0184_TX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MTX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mtx_bootloader.bin"
-        ;;
-    "m0184_hwil_rx"|"M0184_HWIL_RX")
-        TARGET="MODALAI_M0184_HWIL_RX_via_UART"
-        FW="MODALAI_M0184_RX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MRX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mrx_bootloader.bin"
-        ;;
-    "m0193_rx"|"M0193")
-        TARGET="MODALAI_M0193_RX_via_UART"
-        FW="MODALAI_M0193_RX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MRX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mrx_bootloader.bin"
-        ;;
-    "m0193_tx"|"M0193_TX")
-        TARGET="MODALAI_M0193_TX_via_UART"
-        FW="MODALAI_M0193_TX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MTX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mtx_bootloader.bin"
-        ;;
-    "m0193_hwil_tx"|"M0193_HWIL_TX")
-        TARGET="MODALAI_M0193_HWIL_TX_via_UART"
-        FW="MODALAI_M0193_TX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MTX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mtx_bootloader.bin"
-        ;;
-    "m0193_hwil_rx"|"M0193_HWIL_RX")
-        TARGET="MODALAI_M0193_HWIL_RX_via_UART"
-        FW="MODALAI_M0193_RX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        FACTORY_BOOT_ENV="MRX"
-        FACTORY_BOOT_BIN="bootloader/src/binaries/mrx_bootloader.bin"
-        ;;
-    "r9mini"|"R9Mini")
-        # R9Mini support from us stops at fw version 3.2.1... last version from ModalAI was 3.2.1.3
-        TARGET="MODALAI_Frsky_RX_R9MM_R9MINI_via_UART"
-        MINOR_VERSON=2
-        PATCH_VERSION=1
-        FW="FrSky_R9Mini-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        ;;
-    "iFlight")
-        TARGET="Unified_ESP32_900_TX_via_UART"
-        FW="iFlight-900-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        ;;
-    "BETAFPV_900_RX")
-        TARGET="Unified_ESP8285_900_RX_via_UART"
-        FW="BETAFPV_900_RX-$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION.bin"
-        ;;
+[ -n "$TARGET_ALIAS" ] || { echo "Select a target with -t." >&2; exit 1; }
+
+case "$TARGET_ALIAS" in
+    m0184_rx) ENVIRONMENT="MODALAI_M0184_RX_via_UART"; PRODUCT="MODALAI_M0184_RX"; BOOTLOADER_ENV="MRX" ;;
+    m0184_tx) ENVIRONMENT="MODALAI_M0184_TX_via_UART"; PRODUCT="MODALAI_M0184_TX"; BOOTLOADER_ENV="MTX" ;;
+    m0193_rx) ENVIRONMENT="MODALAI_M0193_RX_via_UART"; PRODUCT="MODALAI_M0193_RX"; BOOTLOADER_ENV="MRX" ;;
+    m0193_tx) ENVIRONMENT="MODALAI_M0193_TX_via_UART"; PRODUCT="MODALAI_M0193_TX"; BOOTLOADER_ENV="MTX" ;;
+    m0184_rx_jlink) ENVIRONMENT="MODALAI_M0184_RX_via_JLINK"; PRODUCT="MODALAI_M0184_RX_JLINK"; BOOTLOADER_ENV="" ;;
+    m0184_tx_jlink) ENVIRONMENT="MODALAI_M0184_TX_via_JLINK"; PRODUCT="MODALAI_M0184_TX_JLINK"; BOOTLOADER_ENV="" ;;
+    m0193_rx_jlink) ENVIRONMENT="MODALAI_M0193_RX_via_JLINK"; PRODUCT="MODALAI_M0193_RX_JLINK"; BOOTLOADER_ENV="" ;;
+    m0193_tx_jlink) ENVIRONMENT="MODALAI_M0193_TX_via_JLINK"; PRODUCT="MODALAI_M0193_TX_JLINK"; BOOTLOADER_ENV="" ;;
+    m0184_hwil_rx) ENVIRONMENT="MODALAI_M0184_HWIL_RX_via_UART"; PRODUCT="MODALAI_M0184_HWIL_RX"; BOOTLOADER_ENV="" ;;
+    m0184_hwil_tx) ENVIRONMENT="MODALAI_M0184_HWIL_TX_via_UART"; PRODUCT="MODALAI_M0184_HWIL_TX"; BOOTLOADER_ENV="" ;;
+    m0193_hwil_rx) ENVIRONMENT="MODALAI_M0193_HWIL_RX_via_UART"; PRODUCT="MODALAI_M0193_HWIL_RX"; BOOTLOADER_ENV="" ;;
+    m0193_hwil_tx) ENVIRONMENT="MODALAI_M0193_HWIL_TX_via_UART"; PRODUCT="MODALAI_M0193_HWIL_TX"; BOOTLOADER_ENV="" ;;
     *)
-        echo "Missing Target to build for!"
-        exit
+        echo "Unknown ModalAI target: $TARGET_ALIAS" >&2
+        exit 1
         ;;
 esac
 
-if [ "$FACTORY" -eq 1 ] && [ -z "$FACTORY_BOOT_ENV" ]; then
-    echo "--factory is only supported for ModalAI STM32 targets"
+if [ -z "$MODALAI_REVISION" ]; then
+    highest_tag="$(git tag --list "${BASE_VERSION}.*" | sort -V | tail -n 1)"
+    if [ -n "$highest_tag" ]; then
+        MODALAI_REVISION="${highest_tag##*.}"
+    else
+        MODALAI_REVISION=0
+    fi
+fi
+
+case "$MODALAI_REVISION" in
+    ''|*[!0-9]*) echo "The ModalAI revision must be a nonnegative integer." >&2; exit 1 ;;
+esac
+
+if [ "$BUILD_FACTORY" -eq 1 ] && [ -z "$BOOTLOADER_ENV" ]; then
+    echo "Factory images require a production UART target." >&2
     exit 1
 fi
 
-# Build application
-# export PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915" # not needed since user_defines.txt is used
-if [[ $TARGET == Unified_ESP* ]]; then  
-    #if FW BETAFPV_900_RX
-    if [[ $FW == BETAFPV_900_RX* ]]; then
-        export ELRS_BOARD_CONFIG=betafpv.rx_900.plain
-    fi
-    pio run -e $TARGET
+RELEASE_VERSION="${BASE_VERSION}.${MODALAI_REVISION}"
+BUILD_DIR=".pio/build/${ENVIRONMENT}"
+ARTIFACT_DIR="artifacts/${RELEASE_VERSION}/${ENVIRONMENT}"
+ARTIFACT_NAME="${PRODUCT}-${RELEASE_VERSION}.bin"
+
+echo "Build ${ENVIRONMENT} as ${RELEASE_VERSION}."
+pio run -e "$ENVIRONMENT"
+
+SOURCE_BIN="${BUILD_DIR}/firmware.bin"
+[ -f "$SOURCE_BIN" ] || { echo "The build did not create ${SOURCE_BIN}." >&2; exit 1; }
+
+mkdir -p "$ARTIFACT_DIR"
+if [ -n "$ENCRYPT_KEY" ]; then
+    command -v stm32-encrypt >/dev/null || { echo "Install stm32-encrypt before encrypted builds." >&2; exit 1; }
+    stm32-encrypt "$SOURCE_BIN" "${ARTIFACT_DIR}/${ARTIFACT_NAME}" "$ENCRYPT_KEY"
 else
-    pio run -e $TARGET # -v > build_output.txt
+    install -m 0644 "$SOURCE_BIN" "${ARTIFACT_DIR}/${ARTIFACT_NAME}"
 fi
+md5sum "${ARTIFACT_DIR}/${ARTIFACT_NAME}"
 
-BUILD_DIR=".pio/build/$TARGET"
-md5sum $BUILD_DIR/firmware.bin
+if [ "$BUILD_FACTORY" -eq 1 ]; then
+    echo "Build the ${BOOTLOADER_ENV} bootloader."
+    pio run -d bootloader/src -e "$BOOTLOADER_ENV"
+    BOOTLOADER="bootloader/src/binaries/${BOOTLOADER_ENV,,}_bootloader.bin"
+    [ -f "$BOOTLOADER" ] || { echo "The bootloader does not exist: ${BOOTLOADER}." >&2; exit 1; }
 
-if [ "$ENCRYPT" -eq 1 ]; then 
-    # Encrypt application 
-    echo "Encrypting application"
-    stm32-encrypt $BUILD_DIR/firmware.bin $BUILD_DIR/$FW $ENCRYPT_KEY
-else
-    echo "Leaving application un-encrypted"
-    cp $BUILD_DIR/firmware.bin $BUILD_DIR/$FW
-fi
+    bootloader_size="$(stat -c%s "$BOOTLOADER")"
+    application_size="$(stat -c%s "$SOURCE_BIN")"
+    application_offset=$((0x2400))
+    maximum_application_size=98304
+    [ "$bootloader_size" -le "$application_offset" ] || { echo "The bootloader exceeds the application offset." >&2; exit 1; }
+    [ "$application_size" -le "$maximum_application_size" ] || { echo "The application exceeds the flash partition." >&2; exit 1; }
 
-# Print out md5sum so we can verify what we push onto target matches what we just built and encrypted here
-md5sum $BUILD_DIR/$FW
-
-# Copy/Push ELRS FW bin to desired location on voxl2
-# adb push $BUILD_DIR/$FW /usr/share/modalai/voxl-elrs/firmware/rx
-OUTDIR=artifacts/$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION/$TARGET
-FACTORY_OUTDIR=artifacts/$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION.$MODALAI_VERSION/factory/$TARGET
-mkdir -p $OUTDIR
-cp $BUILD_DIR/$FW $OUTDIR
-
-if [ "$FACTORY" -eq 1 ]; then
-    APP_BIN="$BUILD_DIR/firmware.bin"
-    FACTORY_FW="${FW%.bin}-factory.srec"
-    FACTORY_PATH="$FACTORY_OUTDIR/$FACTORY_FW"
-    FACTORY_BIN_TMP="$BUILD_DIR/${FW%.bin}-factory.bin"
-    FACTORY_STALE_BIN="$FACTORY_OUTDIR/${FW%.bin}-factory.bin"
-    APP_OFFSET_DEC=$((FACTORY_APP_OFFSET))
-    OBJCOPY=${OBJCOPY:-arm-none-eabi-objcopy}
-
-    echo "Building bootloader: $FACTORY_BOOT_ENV"
-    pio run -d bootloader/src -e "$FACTORY_BOOT_ENV"
-
-    if [ ! -f "$FACTORY_BOOT_BIN" ]; then
-        echo "Missing bootloader binary: $FACTORY_BOOT_BIN"
-        exit 1
-    fi
-
-    BOOTLOADER_SIZE=$(stat -c%s "$FACTORY_BOOT_BIN")
-    APP_SIZE=$(stat -c%s "$APP_BIN")
-
-    if [ "$BOOTLOADER_SIZE" -gt "$APP_OFFSET_DEC" ]; then
-        echo "Bootloader binary is too large for app offset 0x$(printf '%X' "$APP_OFFSET_DEC")"
-        exit 1
-    fi
-
-    if [ $((APP_OFFSET_DEC + APP_SIZE)) -gt "$FACTORY_FLASH_SIZE" ]; then
-        echo "Factory image exceeds available flash"
-        exit 1
-    fi
-
-    PADDING_SIZE=$((APP_OFFSET_DEC - BOOTLOADER_SIZE))
-
-    mkdir -p "$FACTORY_OUTDIR"
-    rm -f "$FACTORY_STALE_BIN"
-
-    if ! command -v "$OBJCOPY" >/dev/null 2>&1; then
-        PIO_OBJCOPY="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-objcopy"
-        if [ -x "$PIO_OBJCOPY" ]; then
-            OBJCOPY="$PIO_OBJCOPY"
-        else
-            echo "Missing objcopy: set OBJCOPY or install arm-none-eabi-objcopy"
-            exit 1
-        fi
-    fi
-
+    factory_dir="artifacts/${RELEASE_VERSION}/factory/${ENVIRONMENT}"
+    factory_bin="${BUILD_DIR}/${PRODUCT}-${RELEASE_VERSION}-factory.bin"
+    factory_srec="${factory_dir}/${PRODUCT}-${RELEASE_VERSION}-factory.srec"
+    padding_size=$((application_offset - bootloader_size))
+    mkdir -p "$factory_dir"
     {
-        cat "$FACTORY_BOOT_BIN"
-        if [ "$PADDING_SIZE" -gt 0 ]; then
-            dd if=/dev/zero bs=1 count="$PADDING_SIZE" status=none | tr '\000' '\377'
-        fi
-        cat "$APP_BIN"
-    } > "$FACTORY_BIN_TMP"
-
-    "$OBJCOPY" -I binary -O srec --change-addresses="$FACTORY_FLASH_BASE" "$FACTORY_BIN_TMP" "$FACTORY_PATH"
-    rm -f "$FACTORY_BIN_TMP"
-
-    echo "Factory S-record image created: $FACTORY_PATH"
-    md5sum "$FACTORY_PATH"
+        command cat "$BOOTLOADER"
+        dd if=/dev/zero bs=1 count="$padding_size" status=none | tr '\000' '\377'
+        command cat "$SOURCE_BIN"
+    } > "$factory_bin"
+    pio pkg exec -p toolchain-gccarmnoneeabi -c \
+        "arm-none-eabi-objcopy -I binary -O srec --change-addresses=0x08000000 ${factory_bin} ${factory_srec}"
+    rm -f "$factory_bin"
+    md5sum "$factory_srec"
 fi

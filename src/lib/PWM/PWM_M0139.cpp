@@ -5,8 +5,6 @@
 #include "logging.h"
 #include "variant_M0139.h"
 #include "stm32f1xx_hal.h"
-extern bool servoInitialized;
-
 /* Private variables */
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
@@ -53,7 +51,7 @@ pwm_channel_t PWMController::allocate(uint8_t pin, uint32_t frequency)
                     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
                     __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, 0);  // ALL LEDs OFF
                     break;
-                
+
                 case Ch2:
                     DBGLN("Starting PWM on: %u", pin);
                     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
@@ -65,7 +63,7 @@ pwm_channel_t PWMController::allocate(uint8_t pin, uint32_t frequency)
                     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
                     __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, 0);  // ALL LEDs OFF
                     break;
-                
+
                 case Ch4:
                     DBGLN("Starting PWM on: %u", pin);
                     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
@@ -114,7 +112,7 @@ void PWMController::release(pwm_channel_t channel)
             HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
             digitalWrite(pin, LOW);
             break;
-        
+
         case Ch2:
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, 0);
             HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_4);
@@ -123,12 +121,12 @@ void PWMController::release(pwm_channel_t channel)
 
         case Ch3:
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, 0);
-            HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);     
+            HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
             break;
 
         case Ch4:
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, 0);
-            HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_4);    
+            HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_4);
             break;
 
         default:
@@ -149,22 +147,22 @@ void PWMController::setDuty(pwm_channel_t channel, uint16_t duty)
     uint16_t mappedValue = 0;
     switch(pin){
         case Ch1:
-            mappedValue = map(duty, 0, 100, 0, htim3.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim3));
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, mappedValue);
             break;
-        
+
         case Ch2:
-            mappedValue = map(duty, 0, 100, 0, htim3.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim3));
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, mappedValue);
             break;
 
         case Ch3:
-            mappedValue = map(duty, 0, 100, 0, htim1.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim1));
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, mappedValue);
             break;
 
         case Ch4:
-            mappedValue = map(duty, 0, 100, 0, htim1.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim1));
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, mappedValue);
             break;
 
@@ -187,7 +185,7 @@ void PWMController::setMicroseconds(pwm_channel_t channel, uint16_t microseconds
             mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, mappedValue);
             break;
-        
+
         case Ch2:
             mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, mappedValue);
@@ -197,7 +195,7 @@ void PWMController::setMicroseconds(pwm_channel_t channel, uint16_t microseconds
             mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, mappedValue);
             break;
-        
+
         case Ch4:
             mappedValue = microseconds;
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, mappedValue);
@@ -209,13 +207,17 @@ void PWMController::setMicroseconds(pwm_channel_t channel, uint16_t microseconds
 
 }
 
+void PWMController::feedWatchdog()
+{
+}
+
 void PWMController::initialize()
 {
     DBGLN("Initializing PWMs BEGIN");
     GPIO_Init();
     TIM1_Init();
     TIM3_Init();
-    DBGLN("Initializing PWMs DONE");   
+    DBGLN("Initializing PWMs DONE");
 }
 
 /**
@@ -334,12 +336,12 @@ static void TIM1_Init(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function. 
+  * @brief TIM2 Initialization Function.
   *         ARR = 2068 (Max 2100 us period, some delay so we use 2068)
   *         900  us HIGH -> 886  us (ARR * DUTY/100)... DUTY is ~42.84% (900/2100)
   *         1400 us HIGH -> 1379 us (ARR * DUTY/100)... DUTY is ~66.66% (1400/2100)
   *         2100 us HIGH -> 2068 us (ARR * DUTY/100)... DUTY is 100% (2100/2100)
-  * 
+  *
   * @param None
   * @retval None
   */

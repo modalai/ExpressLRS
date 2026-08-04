@@ -1,0 +1,29 @@
+#include "TXModuleEndpoint.h"
+#include "common.h"
+#include "device.h"
+
+static int event()
+{
+  if (connectionState < FAILURE_STATES)
+  {
+    crsfTransmitter.updateParameters();
+  }
+  return DURATION_NEVER;
+}
+
+static int start()
+{
+  if (connectionState < FAILURE_STATES)
+  {
+    event();
+  }
+  return DURATION_NEVER;
+}
+
+device_t TXLUA_device = {
+  .initialize = nullptr,
+  .start = start,
+  .event = event,
+  .timeout = nullptr,
+  .subscribe = EVENT_ALL
+};

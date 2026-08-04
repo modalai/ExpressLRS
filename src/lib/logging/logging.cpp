@@ -2,17 +2,27 @@
 #include <cstdarg>
 #include "logging.h"
 
-
 #ifdef LOG_USE_PROGMEM
   #define GETCHAR pgm_read_byte(fmt)
 #else
   #define GETCHAR *fmt
 #endif
 
+Stream *BackpackOrLogStrm;
+
+static void debugWrite(const uint8_t *data, const size_t size)
+{
+#if defined(DEBUG_RTT)
+  SEGGER_RTT_Write(0, data, size);
+#else
+  LOGGING_UART.write(data, size);
+#endif
+}
+
 void debugPrintf(const char* fmt, ...)
 {
   char c;
-  const char *v;
+  const char *v = nullptr;
   char buf[21];
   va_list  vlist;
   va_start(vlist,fmt);
@@ -20,6 +30,7 @@ void debugPrintf(const char* fmt, ...)
   c = GETCHAR;
   while(c) {
     if (c == '%') {
+      if (v) debugWrite((const uint8_t *)v, fmt - v);
       fmt++;
       c = GETCHAR;
       v = buf;
@@ -49,22 +60,16 @@ void debugPrintf(const char* fmt, ...)
         default:
           break;
       }
-      #if defined(DEBUG_RTT)
-      SEGGER_RTT_WriteString(0, v);
-      #else
-      LOGGING_UART.write((uint8_t*)v, strlen(v));
-      #endif
+      debugWrite((const uint8_t *)v, strlen(v));
+      v = nullptr;
     } else {
-      #if defined(DEBUG_RTT)
-      SEGGER_RTT_Write(0, &c, 1);
-      #else
-      LOGGING_UART.write(c);
-      #endif
+      if (!v) v = fmt;
     }
     fmt++;
     c = GETCHAR;
   }
   va_end(vlist);
+  if (v) debugWrite((const uint8_t *)v, fmt - v);
 }
 
 #if defined(DEBUG_INIT)
@@ -72,17 +77,18 @@ void debugPrintf(const char* fmt, ...)
 void debugCreateInitLogger()
 {
   #if defined(PLATFORM_ESP32)
-  TxBackpack = new HardwareSerial(1);
-  ((HardwareSerial *)TxBackpack)->begin(460800, SERIAL_8N1, 3, 1);
+  BackpackOrLogStrm = new HardwareSerial(1);
+  ((HardwareSerial *)BackpackOrLogStrm)->begin(460800, SERIAL_8N1, 3, 1);
   #else
-  TxBackpack = new HardwareSerial(0);
-  ((HardwareSerial *)TxBackpack)->begin(460800, SERIAL_8N1);
+  BackpackOrLogStrm = new HardwareSerial(0);
+  ((HardwareSerial *)BackpackOrLogStrm)->begin(460800, SERIAL_8N1);
   #endif
 }
 
 void debugFreeInitLogger()
 {
-  ((HardwareSerial *)TxBackpack)->end();
-  delete (HardwareSerial *)TxBackpack;
+  ((HardwareSerial *)BackpackOrLogStrm)->end();
+  delete (HardwareSerial *)BackpackOrLogStrm;
+  BackpackOrLogStrm = nullptr;
 }
 #endif

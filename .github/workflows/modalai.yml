@@ -11,7 +11,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Run PlatformIO Tests
       run: |
@@ -23,6 +23,16 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            arguments: --release --factory
+          - name: jlink
+            arguments: --jlink
+          - name: hwil
+            arguments: --hwil
     container:
       image: registry.gitlab.com/voxl-public/support/elrs-build-docker:latest
       env:
@@ -33,18 +43,19 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
 
-    - name: Build
+    - name: Build ${{ matrix.name }} artifacts
       run: |
         cd src
-        bash build.sh -t M0139 -v 0 -e $BOOT_KEY
+        ./build_all.sh ${{ matrix.arguments }} -e "$BOOT_KEY"
 
     - name: Store Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
-        name: M0139 Firmware
-        path: src/*.bin
+        name: ModalAI-${{ matrix.name }}
+        path: src/artifacts/**/*
         retention-days: 1
         if-no-files-found: error
-      continue-on-error: true

@@ -4,6 +4,15 @@
 
 #include "ModalAI_Common.h"
 
+#if !defined(__ASSEMBLER__)
+extern const int16_t modalaiPowerValues[3];
+#endif
+#define MODALAI_POWER_OUTPUT_VALUES {0, 2, 5}
+#define POWER_OUTPUT_VALUES modalaiPowerValues
+#define POWER_OUTPUT_VALUES_COUNT 3
+#define POWER_OUTPUT_VALUES2 modalaiPowerValues
+#define POWER_OUTPUT_VALUES2_COUNT 3
+
 // Output Power - Default to SX1276 max output
 // #define POWER_OUTPUT_FIXED 0 // -4 dbm input to FEM
 #define MinPower                PWR_250mW
@@ -15,15 +24,14 @@
 // 0 + -4.2+30=25.8 dBm ~= 300mW
 // 2 + -4.2+30=27.8 dBm ~= 600mW
 // 5 + -4.2+30=29.8 dBm ~= 1000mW
-#define POWER_OUTPUT_VALUES     {0, 2, 5} 
-
 #define USE_SX1276_RFO_HF
+#undef OPT_USE_SX1276_RFO_HF
 #define OPT_USE_SX1276_RFO_HF true
 
 #ifndef DEVICE_NAME
     #define DEVICE_NAME "ModalAI M0193"
 #endif
 
-#define HARDWARE_REV 0x6D313933 // m0184
+#define HARDWARE_REV 0x6D313933 // m0193
 
 #endif // Header guard

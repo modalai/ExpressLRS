@@ -38,9 +38,17 @@ public:
      */
     void setMicroseconds(pwm_channel_t channel, uint16_t microseconds);
 
-#ifdef M0139
-    void initialize(void);
-#endif // M0139
+#if defined(M0139)
+    void initialize();
+#endif
+
+    /**
+     * @brief Service the watchdog timer to prevent an unintended runaway if there are no channel updates.
+     *
+     * Call this method periodically within the required watchdog timeout window to
+     * indicate that the system is still running correctly.
+     */
+    void feedWatchdog();
 };
 
 extern PWMController PWM;

@@ -24,6 +24,7 @@
               openocd
               stlink
               dfu-util
+              shellcheck
             ];
           };
         });

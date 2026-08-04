@@ -16,7 +16,7 @@ def gen_elrs(source, target, env):
     sys.stdout.write("=====================================================================================================================================\n")
     sys.stdout.write("\n")
     sys.stdout.flush()
-    
+
 def gen_frsky(source, target, env):
     print("generating frk file...")
     if "_stock" in env['PIOENV']:

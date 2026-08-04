@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 
 
@@ -19,7 +20,10 @@ def on_upload(source, target, env):
                 offset = int(offset, 16) if "0x" in offset else int(offset, 10)
                 app_start = flash_start + offset
 
-    jlink_exe = os.path.join(env['PROJECT_PACKAGES_DIR'], "tool-jlink", "JLinkExe")
+    packaged_jlink = os.path.join(env['PROJECT_PACKAGES_DIR'], "tool-jlink", "JLinkExe")
+    jlink_exe = packaged_jlink if os.path.isfile(packaged_jlink) else shutil.which("JLinkExe")
+    if not jlink_exe:
+        raise RuntimeError("JLinkExe was not found in PlatformIO packages or PATH")
 
     script_lines = [
         "si SWD",

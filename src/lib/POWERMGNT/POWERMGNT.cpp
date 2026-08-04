@@ -1,6 +1,13 @@
-#include "targets.h"
-#include "logging.h"
 #include "POWERMGNT.h"
+#include "logging.h"
+#include "targets.h"
+
+#include "OTA.h"
+
+#if defined(M0139)
+const int16_t modalaiPowerValues[] = MODALAI_POWER_OUTPUT_VALUES;
+const int16_t * const modalaiNoPowerValues = nullptr;
+#endif
 
 uint8_t powerToCrsfPower(PowerLevels_e Power)
 {
@@ -21,7 +28,7 @@ uint8_t powerToCrsfPower(PowerLevels_e Power)
     }
 }
 
-PowerLevels_e crsfpowerToPower(uint8_t crsfpower)
+PowerLevels_e crsfPowerToPower(uint8_t crsfpower)
 {
     switch (crsfpower)
     {
@@ -42,7 +49,6 @@ PowerLevels_e crsfpowerToPower(uint8_t crsfpower)
 
 #include "common.h"
 #include "device.h"
-#include "DAC.h"
 #include "helpers.h"
 
 /*
@@ -77,26 +83,18 @@ PowerLevels_e PowerLevelContainer::CurrentPower = PWR_COUNT; // default "undefin
 PowerLevels_e POWERMGNT::FanEnableThreshold = PWR_250mW;
 int8_t POWERMGNT::CurrentSX1280Power = 0;
 
-#if defined(TARGET_UNIFIED_TX) || defined(TARGET_UNIFIED_RX)
-static const int16_t *powerValues;
-static const int16_t *powerValuesDual;
-#else
-#if defined(POWER_OUTPUT_VALUES)
-static const int16_t powerValues[] = POWER_OUTPUT_VALUES;
-#if defined(POWER_OUTPUT_DAC) && !defined(TARGET_UNIFIED_TX) && !defined(TARGET_UNIFIED_RX)
-static const int16_t powerValues868[] = POWER_OUTPUT_VALUES_868;
-extern bool isDomain868();
-#endif
-#else
-static const int16_t *powerValues = nullptr;
-#endif
-#endif
+extern bool isUsingPrimaryFreqBand();
 
 static int8_t powerCaliValues[PWR_COUNT] = {0};
 
 #if defined(PLATFORM_ESP32)
 nvs_handle POWERMGNT::handle = 0;
 #endif
+
+// Get the POWER_VALUE_X to send to DAC/RF chip of the speficied index into the array
+// If the index is higher than the array has values, return the LOWEST power value
+// Maybe the user will realize they can't just set MaxPower to 2000mW and get more power
+#define SAFE_GET_POWER_VALUE(values, idx) (((idx) < (values##_COUNT)) ? (values)[idx] : (values)[0])
 
 PowerLevels_e POWERMGNT::incPower()
 {
@@ -119,7 +117,7 @@ PowerLevels_e POWERMGNT::decPower()
 void POWERMGNT::incSX1280Output()
 {
     // Power adjustment is capped to within +-3dB of the target power level to prevent power run-away
-    if (CurrentSX1280Power < 13 && CurrentSX1280Power < powerValues[CurrentPower] + 3)
+    if (CurrentSX1280Power < 13 && CurrentSX1280Power < SAFE_GET_POWER_VALUE(POWER_OUTPUT_VALUES, CurrentPower) + 3)
     {
         CurrentSX1280Power++;
         Radio.SetOutputPower(CurrentSX1280Power);
@@ -129,7 +127,7 @@ void POWERMGNT::incSX1280Output()
 void POWERMGNT::decSX1280Output()
 {
     // Power adjustment is capped to within +-3dB of the target power level to prevent power run-away
-    if (CurrentSX1280Power > -18 && CurrentSX1280Power > powerValues[CurrentPower] - 3)
+    if (CurrentSX1280Power > -18 && CurrentSX1280Power > SAFE_GET_POWER_VALUE(POWER_OUTPUT_VALUES, CurrentPower) - 3)
     {
         CurrentSX1280Power--;
         Radio.SetOutputPower(CurrentSX1280Power);
@@ -224,29 +222,6 @@ void POWERMGNT::init()
 {
     PowerLevelContainer::CurrentPower = PWR_COUNT;
 
-#if defined(TARGET_UNIFIED_TX) || defined(TARGET_UNIFIED_RX)
-    powerValues = POWER_OUTPUT_VALUES;
-    if (POWER_OUTPUT_VALUES_DUAL != nullptr)
-    {
-        powerValuesDual = POWER_OUTPUT_VALUES_DUAL;
-    }
-#endif
-#if defined(POWER_OUTPUT_DAC)
-    TxDAC.init();
-#elif defined(POWER_OUTPUT_ANALOG)
-    //initialize both 12 bit DACs
-    pinMode(GPIO_PIN_RFamp_APC1, OUTPUT);
-    pinMode(GPIO_PIN_RFamp_APC2, OUTPUT);
-    analogWriteResolution(12);
-
-    // WARNING: The two calls to analogWrite below are needed for the
-    // lite pro, as it seems that the very first calls to analogWrite
-    // fail for an unknown reason (suspect Arduino lib bug). These
-    // set power to 50mW, which should get overwitten shortly after
-    // boot by whatever is set in the EEPROM. @wvarty
-    analogWrite(GPIO_PIN_RFamp_APC1, 3350); //0-4095 2.7V
-    analogWrite(GPIO_PIN_RFamp_APC2, 950);
-#endif
     LoadCalibration();
     setDefaultPower();
 }
@@ -274,51 +249,45 @@ void POWERMGNT::setPower(PowerLevels_e Power)
     Power = constrain(Power, getMinPower(), getMaxPower());
     if (Power == CurrentPower)
         return;
+    CurrentPower = Power;
 
-#if defined(POWER_OUTPUT_DAC)
-    // DAC is used e.g. for R9M, ES915TX and Voyager
-    int mV = isDomain868() ? powerValues868[Power - MinPower] :powerValues[Power - MinPower];
-    TxDAC.setPower(mV);
-#elif defined(POWER_OUTPUT_ANALOG)
-    //Set DACs PA5 & PA4
-    analogWrite(GPIO_PIN_RFamp_APC1, 3350); //0-4095 2.7V
-    analogWrite(GPIO_PIN_RFamp_APC2, powerValues[Power - MinPower]);
-#else
-    #if defined(PLATFORM_ESP32)
-    if (POWER_OUTPUT_DACWRITE && POWER_OUTPUT_VALUES != nullptr)
+    // When using SubHGz with CE, limit to a max of 25mW.
+    #if defined(Regulatory_Domain_EU_CE_2400) && defined(RADIO_LR1121)
+    if (Power > PWR_25mW && isUsingPrimaryFreqBand())
+    {
+        Power = (MinPower > PWR_25mW) ? getMinPower() : PWR_25mW;
+    }
+    #endif
+
+    const uint8_t powerIdx = Power - getMinPower();
+    if (POWER_OUTPUT_DACWRITE)
     {
         if (POWER_OUTPUT_VALUES2 != nullptr)
         {
-            Radio.SetOutputPower(POWER_OUTPUT_VALUES2[Power - MinPower]);
+            Radio.SetOutputPower(SAFE_GET_POWER_VALUE(POWER_OUTPUT_VALUES2, powerIdx));
         }
-        #if defined(PLATFORM_ESP32_S3) || defined(PLATFORM_ESP32_C3)
-        ERRLN("ESP32-S3 does not have a DAC");
+        #if defined(PLATFORM_ESP32_S3) || defined(PLATFORM_ESP32_C3) || defined(PLATFORM_ESP8266) || defined(PLATFORM_STM32)
+        ERRLN("This MCU does not have a supported DAC");
         #else
-        dacWrite(GPIO_PIN_RFamp_APC2, powerValues[Power - MinPower]);
+        dacWrite(GPIO_PIN_RFamp_APC2, SAFE_GET_POWER_VALUE(POWER_OUTPUT_VALUES, powerIdx));
         #endif
     }
-    else
-    #endif
-    if (POWER_OUTPUT_FIXED != -99)
+    else if (POWER_OUTPUT_VALUES != nullptr)
     {
-        Radio.SetOutputPower(POWER_OUTPUT_FIXED);
-    }
-    else if (powerValues != nullptr)
-    {
-        CurrentSX1280Power = powerValues[Power - MinPower] + powerCaliValues[Power];
+        CurrentSX1280Power = SAFE_GET_POWER_VALUE(POWER_OUTPUT_VALUES, powerIdx) + powerCaliValues[Power];
         Radio.SetOutputPower(CurrentSX1280Power);
     }
-#endif
 
 #if defined(RADIO_LR1121)
     if (POWER_OUTPUT_VALUES_DUAL != nullptr)
     {
-        Radio.SetOutputPower(powerValuesDual[Power - MinPower], false); // Set the high frequency power setting.
+        Radio.SetOutputPower(SAFE_GET_POWER_VALUE(POWER_OUTPUT_VALUES_DUAL, powerIdx), false); // Set the high frequency power setting.
     }
 #endif
 
     CurrentPower = Power;
-    devicesTriggerEvent();
+    linkStats.uplink_TX_Power = powerToCrsfPower(PowerLevelContainer::currPower());
+    devicesTriggerEvent(EVENT_POWER_CHANGED);
 }
 
 #endif /* !UNIT_TEST */

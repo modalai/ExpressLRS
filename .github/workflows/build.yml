@@ -1,23 +1,64 @@
 name: Build ExpressLRS
-on: release
+on: [push, pull_request]
 jobs:
+  build-and-validate-artifacts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd src/html
+          npm ci
+
+      - name: Build Web UI for all platforms
+        run: |
+          cd src/html
+          cp -r headers out
+          npm run build:all
+
+      - name: Validate artifacts
+        id: validate
+        run: |
+          cd src/html
+          if diff -qr out headers >/dev/null 2>&1; then
+            echo "::notice::Artifact check passed."
+            exit 0
+          else
+            exit_code=$?
+            if [ "$exit_code" -eq 1 ]; then
+              echo "::error title=Web UI Artifacts Error::Web UI artifacts have not been built and committed. Please build and commit them as part of this PR."
+              exit 1
+            else
+              echo "::warning::An unexpected error ($exit_code) occurred during file comparison."
+              exit 2
+            fi
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:
 
     - name: Inject slug/short variables
-      uses: rlespinasse/github-slug-action@v4
+      uses: rlespinasse/github-slug-action@v5
 
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.10'
 
     - name: Cache pip
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ matrix.target }}
@@ -29,7 +70,7 @@ jobs:
         pip install wheel
 
     - name: Cache PlatformIO
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.platformio
         key: ${{ runner.os }}-platformio
@@ -42,14 +83,17 @@ jobs:
         PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_ISM_2400" pio test -e native
 
   targets:
+    needs:
+      - build-and-validate-artifacts
+      - test
     runs-on: ubuntu-latest
     outputs:
       targets: ${{ steps.set-targets.outputs.targets }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - id: set-targets
-      run: echo "targets=[$( (grep '\[env:.*UART\]' src/targets/unified.ini ; grep -r '\[env:.*STLINK\]' src/targets/) | sed 's/.*://' | sed s/.$// | egrep "(STLINK|UART)" | grep -v DEPRECATED | tr '\n' ','  | sed 's/,$/"\n/' | sed 's/,/","/'g | sed 's/^/"/')]" >> $GITHUB_OUTPUT
+      run: echo "targets=[$( (grep '\[env:.*UART\]' src/targets/*.ini ; grep -r '\[env:.*STLINK\]' src/targets/) | sed 's/.*://' | sed s/.$// | egrep "(STLINK|UART)" | grep -v DEPRECATED | tr '\n' ','  | sed 's/,$/"\n/' | sed 's/,/","/'g | sed 's/^/"/')]" >> $GITHUB_OUTPUT
 
   build:
     needs: targets
@@ -61,18 +105,18 @@ jobs:
     steps:
 
     - name: Inject slug/short variables
-      uses: rlespinasse/github-slug-action@v4
+      uses: rlespinasse/github-slug-action@v5
 
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.10'
 
     - name: Cache pip
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ matrix.target }}
@@ -84,10 +128,21 @@ jobs:
         pip install wheel
 
     - name: Cache PlatformIO
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.platformio
         key: ${{ runner.os }}-platformio
+
+    - name: Install Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: 'latest'
+
+    - name: Cache node-modules
+      uses: actions/cache@v5
+      with:
+        path: src/html/node-modules
+        key: ${{ runner.os }}-node-modules
 
     - name: Run PlatformIO
       run: |
@@ -108,6 +163,18 @@ jobs:
             mkdir -p $OUTDIR
             mv .pio/build/${{ matrix.target }}/*.{elrs,bin} $OUTDIR >& /dev/null || :
             ;;
+          *LR1121*)
+            # release builds
+            PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_EU_CE_2400 -DRegulatory_Domain_FCC_915" pio run -e ${{ matrix.target }}
+            OUTDIR=~/artifacts/firmware/LBT/`echo ${{ matrix.target }} | sed s/_via.*//`
+            mkdir -p $OUTDIR
+            mv .pio/build/${{ matrix.target }}/*.{elrs,bin} $OUTDIR >& /dev/null || :
+
+            PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915" pio run -e ${{ matrix.target }}
+            OUTDIR=~/artifacts/firmware/FCC/`echo ${{ matrix.target }} | sed s/_via.*//`
+            mkdir -p $OUTDIR
+            mv .pio/build/${{ matrix.target }}/*.{elrs,bin} $OUTDIR >& /dev/null || :
+            ;;
           *)
             # release build
             PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_FCC_915" pio run -e ${{ matrix.target }}
@@ -118,7 +185,7 @@ jobs:
         esac
 
     - name: Store Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: temp-${{ matrix.target }}
         path: ~/artifacts/**/*
@@ -130,18 +197,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Checkout targets repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ExpressLRS/targets
           path: src/hardware
 
       - name: Get firmware artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -154,13 +221,13 @@ jobs:
       - name: Copy Lua to to firmware folder
         run: |
           mkdir -p dist/firmware/lua
-          cp -r src/lua/elrsV3.lua dist/firmware/lua
+          cp -r src/lua/elrs.lua dist/firmware/lua
 
       - name: Copy bootloader files to firmware folder
         run: cd src ; find bootloader -name \*.bin -o -name \*.frk | grep -v src/ | cpio -pdm ../dist/firmware
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
@@ -171,7 +238,7 @@ jobs:
           shiv -c flash -o ../../dist/firmware/flasher.pyz pyserial .
 
       - name: Update firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: dist/**/*
@@ -181,6 +248,11 @@ jobs:
           cd dist
           zip -r -9 ../firmware.zip ./firmware
 
+      - name: Install downgraded AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: "2.22.35"
+
       - name: Upload firmware bundle to ExpressLRS artifactory
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -188,18 +260,20 @@ jobs:
           AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
           AWS_REGION: "auto"
         run: |
+          aws --version
           if [[ -z $AWS_ACCESS_KEY_ID || -z $AWS_SECRET_ACCESS_KEY || -z $AWS_ENDPOINT_URL ]]; then
-            echo "Artifactory credentials are not defined. Most likely action is running from pull request. Not a bug."
+            echo "::warning title=Artifactory Skip::Credentials not defined. Skipping upload (expected for PRs from forks)."
             exit 0
           fi
-
-          aws s3api head-object --endpoint-url $AWS_ENDPOINT_URL --bucket expresslrs --key ExpressLRS/$GITHUB_SHA/firmware.zip > /dev/null || ALLOW_UPLOAD=true
-          git describe --tags --exact-match HEAD && ALLOW_UPLOAD=true
-          if [ $ALLOW_UPLOAD ]; then
-            echo "Uploading firmware to artifactory"
+          
+          IS_TAG=$([[ "$GITHUB_REF_TYPE" == "tag" ]] && echo true || echo false)
+          ARTIFACT_EXISTS=$(aws s3api head-object --endpoint-url $AWS_ENDPOINT_URL --bucket expresslrs --key ExpressLRS/$GITHUB_SHA/firmware.zip > /dev/null 2>&1 && echo true || echo false)
+          
+          if [ "$IS_TAG" = "true" ] || [ "$ARTIFACT_EXISTS" = "false" ]; then
+            echo "Uploading firmware to artifactory..."
             aws s3 cp --endpoint-url $AWS_ENDPOINT_URL firmware.zip s3://expresslrs/ExpressLRS/$GITHUB_SHA/firmware.zip
-
-            echo "Generating artifact index"
+          
+            echo "::group::Generating and Uploading Artifact Index"
             aws s3 ls --endpoint-url $AWS_ENDPOINT_URL s3://expresslrs/ExpressLRS/ | awk '{print $2}' | sed s/\\/// > /tmp/hashes
             echo '{' > index.json
             echo '"branches": {' >> index.json
@@ -211,10 +285,11 @@ jobs:
             echo '' >> index.json
             echo '}' >> index.json
             echo '}' >> index.json
-
-            echo "Uploading artifact index"
+          
             aws s3 cp --endpoint-url $AWS_ENDPOINT_URL index.json s3://expresslrs/ExpressLRS/index.json
+            echo "::endgroup::"
+          
+            echo "::notice title=Artifactory Upload Success::Firmware for $GITHUB_SHA has been uploaded."
           else
-            echo "Not overwriting already existing artifact at $GITHUB_SHA"
-            exit 1
+            echo "::notice title=Artifactory Skip::Artifact already exists and this is not a tag push. Skipping overwrite."
           fi

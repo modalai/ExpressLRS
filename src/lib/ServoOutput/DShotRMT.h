@@ -1,4 +1,4 @@
-#if (defined(GPIO_PIN_PWM_OUTPUTS) && defined(PLATFORM_ESP32))
+#if defined(TARGET_RX) && defined(PLATFORM_ESP32)
 //
 // Name:		DShotRMT.h
 // Created: 	20.03.2021 00:49:15
@@ -32,7 +32,7 @@ constexpr auto RMT_CYCLES_PER_ESP_CYCLE = (F_CPU / RMT_CYCLES_PER_SEC);
 // Date:	04.07.2021
 
 enum dshot_cmd_t {
-	DSHOT_CMD_MOTOR_STOP,				// Currently not implemented - STOP Motors
+	DSHOT_CMD_MOTOR_STOP = 0, 			// ARM ESC and set zero throttle (stop motor)
 	DSHOT_CMD_BEEP1,					// Wait at least length of beep (380ms) before next command
 	DSHOT_CMD_BEEP2,					// Wait at least length of beep (380ms) before next command
 	DSHOT_CMD_BEEP3,					// Wait at least length of beep (400ms) before next command
@@ -95,6 +95,7 @@ public:
 
 	// ...safety first ...no parameters, no DShot
 	bool begin(dshot_mode_t dshot_mode = DSHOT_OFF, bool is_bidirectional = false);
+	void set_looping(bool);
 	void send_dshot_value(uint16_t throttle_value, telemetric_request_t telemetric_request = NO_TELEMETRIC);
 
 private:
