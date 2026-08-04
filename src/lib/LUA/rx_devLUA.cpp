@@ -1308,41 +1308,27 @@ static void registerLuaParameters()
     config.SetBindStorage((rx_config_bindstorage_t)arg);
   });
   registerLUAParameter(&luaBindMode, [](struct luaPropertiesCommon* item, uint8_t arg){
-    luaCmdStep_e newStep;
-    const char *msg;
-
-    if (arg == lcsClick) {
-      // Execute immediately on click
-      newStep = lcsExecuting;
-      msg = "Entering bind mode";
-      EnterBindingModeSafely();
+    if (arg == lcsClick)
+    {
+      sendLuaCommandResponse(&luaBindMode, lcsExecuting, "Entering bind mode");
+      deferExecutionMillis(200, EnterBindingModeSafely);
     }
-    else {
-      // Return to idle on query or any other state
-      newStep = lcsIdle;
-      msg = "";
+    else
+    {
+      sendLuaCommandResponse(&luaBindMode, lcsIdle, STR_EMPTYSPACE);
     }
-
-    sendLuaCommandResponse(&luaBindMode, newStep, msg);
   });
 
   registerLUAParameter(&luaUnbindMode, [](struct luaPropertiesCommon* item, uint8_t arg){
-    luaCmdStep_e newStep;
-    const char *msg;
-
-    if (arg == lcsClick) {
-      // Execute immediately on click
-      newStep = lcsExecuting;
-      msg = "Entering unbind mode";
-      EnterUnbindMode();
+    if (arg == lcsClick)
+    {
+      sendLuaCommandResponse(&luaUnbindMode, lcsExecuting, "Entering unbind mode");
+      deferExecutionMillis(200, EnterUnbindMode);
     }
-    else {
-      // Return to idle on query or any other state
-      newStep = lcsIdle;
-      msg = "";
+    else
+    {
+      sendLuaCommandResponse(&luaUnbindMode, lcsIdle, STR_EMPTYSPACE);
     }
-
-    sendLuaCommandResponse(&luaUnbindMode, newStep, msg);
   });
 
 #if defined(POWER_OUTPUT_VALUES)

@@ -429,18 +429,13 @@ static bool getParameterWriteValueBytes(const uint8_t *packetData, const uint8_t
   }
 
   const crsf_ext_header_t *header = (const crsf_ext_header_t *)packetData;
-  const uint8_t payloadLen = header->frame_size - CRSF_FRAME_LENGTH_EXT_TYPE_CRC;
-  if (payloadLen == 0)
+  if (header->frame_size < CRSF_FRAME_LENGTH_EXT_TYPE_CRC)
   {
     return false;
   }
 
-  uint8_t valueOffset = 1;
-  if (header->payload[0] == header->dest_addr)
-  {
-    valueOffset = 2;
-  }
-
+  const uint8_t payloadLen = header->frame_size - CRSF_FRAME_LENGTH_EXT_TYPE_CRC;
+  const uint8_t valueOffset = 1;
   if (payloadLen <= valueOffset)
   {
     return false;
@@ -588,58 +583,49 @@ bool luaHandleUpdateParameter()
       } else {
         uint8_t id = parameterIndex;
         uint8_t arg = parameterArg;
+        if (id >= LUA_MAX_PARAMS || paramDefinitions[id] == nullptr)
+        {
+          DBGLN("Invalid Lua parameter %u", id);
+          break;
+        }
+
         struct luaPropertiesCommon *p = paramDefinitions[id];
-        const uint8_t *chunkData = nullptr;
         const uint8_t *writeValueBytes = nullptr;
         uint8_t writeValueLen = 0;
-
         if (parameterData != nullptr)
         {
-          uint8_t frameSize = parameterData[CRSF_TELEMETRY_LENGTH_INDEX];
-          if (frameSize > CRSF_FRAME_LENGTH_EXT_TYPE_CRC)
-          {
-            uint8_t chunkSize = frameSize - CRSF_FRAME_LENGTH_EXT_TYPE_CRC;
-            if (chunkSize > 2)
-            {
-              chunkData = &parameterData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1];
-            }
-          }
-
           getParameterWriteValueBytes(parameterData, &writeValueBytes, &writeValueLen);
         }
 
-	        // Handle STRING parameter writes specially
-	        uint8_t dataType = p->type & CRSF_FIELD_TYPE_MASK;
-	          if (dataType == CRSF_STRING && parameterData != nullptr) {
-          // Extract string from packet data
-          // CRSF_TELEMETRY_FIELD_CHUNK_INDEX points to the arg byte
-          // String data starts at the NEXT byte (index + 1)
-          struct luaItem_string *stringParam = (struct luaItem_string *)p;
-          const char *newValue = (const char *)(chunkData ? chunkData : (parameterData + CRSF_TELEMETRY_FIELD_CHUNK_INDEX + 1));
-          DBGLN("Set Lua STRING [%s]='%s' (len=%u)", p->name, newValue, strlen(newValue));
-
-          // Update the string value in the parameter structure
-          // Note: This assumes the string buffer is writable and large enough
-          // The callback will read from stringParam->value
-          size_t copyLen = stringParam->maxlen + 1; // +1 for null terminator
-          strlcpy((char *)stringParam->value, newValue, copyLen);
-          DBGLN("Copied to param buffer: '%s' (len=%u)", stringParam->value, strlen(stringParam->value));
-
-          // Call the callback if registered
-	          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
-	            paramCallbacks[id](p, 0);  // arg is not used for STRING types
-	          }
-	        } else {
-	          updateLuaCachedWriteValue(p, dataType, arg, writeValueBytes, writeValueLen);
-	          // Handle numeric parameter writes
-	          DBGLN("Set Lua [%s]=%u", p->name, arg);
-	          if (id < LUA_MAX_PARAMS && paramCallbacks[id]) {
-            // While the command is executing, the handset will send `WRITE state=lcsQuery`.
-            // paramCallbacks will set the value when nextStatusChunk == 0, or send any
-            // remaining chunks when nextStatusChunk != 0
-            if (arg == lcsQuery && nextStatusChunk != 0) {
+        uint8_t dataType = p->type & CRSF_FIELD_TYPE_MASK;
+        if (dataType == CRSF_STRING)
+        {
+          if (writeValueBytes != nullptr &&
+              memchr(writeValueBytes, '\0', writeValueLen) != nullptr)
+          {
+            struct luaItem_string *stringParam = (struct luaItem_string *)p;
+            const char *newValue = (const char *)writeValueBytes;
+            DBGLN("Set Lua STRING [%s]='%s' (len=%u)", p->name, newValue, strlen(newValue));
+            strlcpy((char *)stringParam->value, newValue, stringParam->maxlen + 1);
+            if (paramCallbacks[id])
+            {
+              paramCallbacks[id](p, 0);
+            }
+          }
+        }
+        else
+        {
+          updateLuaCachedWriteValue(p, dataType, arg, writeValueBytes, writeValueLen);
+          DBGLN("Set Lua [%s]=%u", p->name, arg);
+          if (paramCallbacks[id])
+          {
+            // Send remaining command chunks when the host polls for status.
+            if (arg == lcsQuery && nextStatusChunk != 0)
+            {
               pushResponseChunk((struct luaItem_command *)p);
-            } else {
+            }
+            else
+            {
               paramCallbacks[id](p, arg);
             }
           }

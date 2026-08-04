@@ -3,9 +3,16 @@
 #include <unity.h>
 
 #include "common.h"
+#include "crc.h"
 
 Telemetry telemetry;
 uint32_t ChannelData[CRSF_NUM_CHANNELS];      // Current state of channels, CRSF format
+GENERIC_CRC8 testCrc(CRSF_CRC_POLY);
+
+void setCrsfCrc(uint8_t *frame)
+{
+    frame[frame[1] + 1] = testCrc.calc(&frame[2], frame[1] - 1);
+}
 
 int sendData(uint8_t *data, int length)
 {
@@ -156,6 +163,68 @@ void test_function_bootloader_called(void)
     TEST_ASSERT_EQUAL(true, telemetry.ShouldCallBootloader());
 }
 
+void test_function_parameter_read_request(void)
+{
+    telemetry.ResetState();
+    uint8_t frame[] = {
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 2,
+        CRSF_FRAMETYPE_PARAMETER_READ,
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_ADDRESS_CRSF_TRANSMITTER,
+        41,
+        3,
+        0
+    };
+    setCrsfCrc(frame);
+
+    TEST_ASSERT_EQUAL(sizeof(frame), sendData(frame, sizeof(frame)));
+    TEST_ASSERT_TRUE(telemetry.ShouldCallParameterRequest());
+    TEST_ASSERT_EQUAL(CRSF_FRAMETYPE_PARAMETER_READ, telemetry.GetParameterRequestType());
+    TEST_ASSERT_EQUAL(41, telemetry.GetParameterRequestIndex());
+    TEST_ASSERT_EQUAL(3, telemetry.GetParameterRequestArg());
+}
+
+void test_function_parameter_write_request(void)
+{
+    telemetry.ResetState();
+    uint8_t frame[] = {
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 2,
+        CRSF_FRAMETYPE_PARAMETER_WRITE,
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_ADDRESS_CRSF_TRANSMITTER,
+        42,
+        6,
+        0
+    };
+    setCrsfCrc(frame);
+
+    TEST_ASSERT_EQUAL(sizeof(frame), sendData(frame, sizeof(frame)));
+    TEST_ASSERT_TRUE(telemetry.ShouldCallParameterRequest());
+    TEST_ASSERT_EQUAL(CRSF_FRAMETYPE_PARAMETER_WRITE, telemetry.GetParameterRequestType());
+    TEST_ASSERT_EQUAL(42, telemetry.GetParameterRequestIndex());
+    TEST_ASSERT_EQUAL(6, telemetry.GetParameterRequestArg());
+}
+
+void test_function_parameter_request_requires_argument(void)
+{
+    telemetry.ResetState();
+    uint8_t frame[] = {
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 1,
+        CRSF_FRAMETYPE_PARAMETER_READ,
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_ADDRESS_CRSF_TRANSMITTER,
+        41,
+        0
+    };
+    setCrsfCrc(frame);
+
+    TEST_ASSERT_EQUAL(sizeof(frame), sendData(frame, sizeof(frame)));
+    TEST_ASSERT_FALSE(telemetry.ShouldCallParameterRequest());
+}
+
 void test_function_store_unknown_type(void)
 {
     telemetry.ResetState();
@@ -246,6 +315,9 @@ int main(int argc, char **argv)
     UNITY_BEGIN();
     RUN_TEST(test_function_uart_in);
     RUN_TEST(test_function_bootloader_called);
+    RUN_TEST(test_function_parameter_read_request);
+    RUN_TEST(test_function_parameter_write_request);
+    RUN_TEST(test_function_parameter_request_requires_argument);
     RUN_TEST(test_function_battery);
     RUN_TEST(test_function_replace_old);
     RUN_TEST(test_function_do_not_replace_old_locked);

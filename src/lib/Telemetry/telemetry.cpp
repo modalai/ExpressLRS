@@ -343,15 +343,14 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
     if (header->type == CRSF_FRAMETYPE_PARAMETER_READ ||
         header->type == CRSF_FRAMETYPE_PARAMETER_WRITE)
     {
-        if (header->dest_addr == CRSF_ADDRESS_BROADCAST ||
-            header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER)
+        if (header->frame_size >= (CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 2) &&
+            (header->dest_addr == CRSF_ADDRESS_BROADCAST ||
+             header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER))
         {
             callParameterRequest = true;
             paramRequestType = header->type;
-            // For extended frames with repeated destination:
-            // payload[0] = dest_addr (again), payload[1] = field_id, payload[2] = chunk/arg
-            paramRequestIndex = header->payload[1];   // Field ID (skip repeated dest)
-            paramRequestArg = header->payload[2];     // Chunk or arg
+            paramRequestIndex = header->payload[0];
+            paramRequestArg = header->payload[1];
             return true;
         }
     }
