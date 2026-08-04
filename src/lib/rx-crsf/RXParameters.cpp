@@ -882,11 +882,15 @@ void RXEndpoint::registerParameters()
     config.SetBindStorage((rx_config_bindstorage_t)arg);
   });
   registerParameter(&luaBindMode, [this](propertiesCommon* item, uint8_t arg){
-    // Complete when TX polls for status i.e. going back to idle, because we're going to lose connection
-    if (arg == lcsQuery) {
+    if (arg == lcsClick)
+    {
+      sendCommandResponse(&luaBindMode, lcsExecuting, "Entering...");
       deferExecutionMillis(200, EnterBindingModeSafely);
     }
-    sendCommandResponse(&luaBindMode, arg < 5 ? lcsExecuting : lcsIdle, arg < 5 ? "Entering..." : "");
+    else
+    {
+      sendCommandResponse(&luaBindMode, lcsIdle, STR_EMPTYSPACE);
+    }
   });
 
   registerParameter(&luaModelNumber);
