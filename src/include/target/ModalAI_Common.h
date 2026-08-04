@@ -183,7 +183,6 @@ extern const int16_t * const modalaiNoPowerValues;
 #if defined(DEV)
 #define DEBUG_LOG
 #define DEBUG_RTT
-#define DEBUG_LOG_VERBOSE
 //#define DEBUG_RX_SCOREBOARD
 #endif
 

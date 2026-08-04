@@ -84,6 +84,10 @@ fi
 case "$MODALAI_REVISION" in
     ''|*[!0-9]*) echo "The ModalAI revision must be a nonnegative integer." >&2; exit 1 ;;
 esac
+if [ "$MODALAI_REVISION" -gt 255 ]; then
+    echo "The ModalAI revision must not exceed 255." >&2
+    exit 1
+fi
 
 if [ "$BUILD_FACTORY" -eq 1 ] && [ -z "$BOOTLOADER_ENV" ]; then
     echo "Factory images require a production UART target." >&2
@@ -96,7 +100,7 @@ ARTIFACT_DIR="artifacts/${RELEASE_VERSION}/${ENVIRONMENT}"
 ARTIFACT_NAME="${PRODUCT}-${RELEASE_VERSION}.bin"
 
 echo "Build ${ENVIRONMENT} as ${RELEASE_VERSION}."
-pio run -e "$ENVIRONMENT"
+MODALAI_RELEASE_VERSION="$RELEASE_VERSION" pio run -e "$ENVIRONMENT"
 
 SOURCE_BIN="${BUILD_DIR}/firmware.bin"
 [ -f "$SOURCE_BIN" ] || { echo "The build did not create ${SOURCE_BIN}." >&2; exit 1; }

@@ -120,11 +120,15 @@ def condense_flags():
 def version_to_env():
     ver = elrs_helpers.get_git_version()
     if target_name.startswith("MODALAI_"):
-        for flag in build_flags:
-            match = re.fullmatch(r'-DLatest_Version="?([^"\s]+)"?', flag.strip())
-            if match:
-                ver['version'] = match.group(1)
-                break
+        release_version = os.environ.get("MODALAI_RELEASE_VERSION")
+        if release_version:
+            ver['version'] = release_version
+        else:
+            for flag in build_flags:
+                match = re.fullmatch(r'-DLatest_Version="?([^"\s]+)"?', flag.strip())
+                if match:
+                    ver['version'] = match.group(1)
+                    break
     env.Append(GIT_SHA = ver['sha'], GIT_VERSION= ver['version'])
 
 def string_to_ascii(str):

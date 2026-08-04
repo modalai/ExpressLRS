@@ -405,12 +405,10 @@ static void ICACHE_RAM_ATTR HandleFHSS()
     }
 
 #if defined(RADIO_SX127X)
-    // SX127x radio has to reset receive mode after hopping
-    uint8_t modresultTLM = OtaNonce % ExpressLRS_currTlmDenom;
-    if (modresultTLM != 0 || ExpressLRS_currTlmDenom == 1) // if we are about to send a tlm response don't bother going back to rx
-    {
-        Radio.RXnb();
-    }
+    // SX127x must return to receive mode after each hop.
+    // A later telemetry transmission can replace this mode.
+    // A blocked telemetry slot otherwise leaves the radio in standby.
+    Radio.RXnb();
 #endif
     LbtCcaTimerStart();
 }
@@ -1176,6 +1174,7 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
     if (Radio.FrequencyErrorAvailable())
     {
     #if defined(RADIO_SX127X)
+#if !defined(M0139)
         int32_t tempFreqCorrection = HandleFreqCorr(Radio.GetFrequencyErrorbool(Radio.GetProcessingPacketRadio()), Radio.GetProcessingPacketRadio());
         // Teamp900 also needs to adjust its demood PPM
         Radio.SetPPMoffsetReg(tempFreqCorrection, Radio.GetProcessingPacketRadio());
@@ -1186,6 +1185,7 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
             tempFreqCorrection = HandleFreqCorr(Radio.GetFrequencyErrorbool(secondRadio), secondRadio);
             Radio.SetPPMoffsetReg(tempFreqCorrection, secondRadio);
         }
+#endif
     #else
         HandleFreqCorr(Radio.GetFrequencyErrorbool(Radio.GetProcessingPacketRadio()), Radio.GetProcessingPacketRadio());
 
@@ -2081,9 +2081,15 @@ void setup()
         BackpackOrLogStrm = new NullStream();
         #endif
 
+        // External EEPROM targets need their fixed I2C pins before the config load.
+#if defined(TARGET_USE_EEPROM) && defined(USE_I2C)
+        setupTarget();
+#endif
         // Init EEPROM and load config, checking powerup count
         setupConfigAndPocCheck();
+#if !(defined(TARGET_USE_EEPROM) && defined(USE_I2C))
         setupTarget();
+#endif
         // If serial is not already defined, then see if there is serial pin configured in the PWM configuration
         if (OPT_HAS_SERVO_OUTPUT && GPIO_PIN_RCSIGNAL_RX == UNDEF_PIN && GPIO_PIN_RCSIGNAL_TX == UNDEF_PIN)
         {

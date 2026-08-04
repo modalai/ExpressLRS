@@ -25,6 +25,17 @@ static unsigned long rebootTime_Ms = 0;
 
 static void setupWire()
 {
+#if defined(PLATFORM_STM32) && defined(M0139)
+    if (GPIO_PIN_SDA != UNDEF_PIN && GPIO_PIN_SCL != UNDEF_PIN)
+    {
+        // The STM32 Wire overloads treat int arguments as an address and a general-call flag.
+        Wire.setSCL(GPIO_PIN_SCL);
+        Wire.setSDA(GPIO_PIN_SDA);
+        Wire.begin();
+        Wire.setClock(400000);
+        i2c_enabled = true;
+    }
+#else
     int gpio_scl = GPIO_PIN_SCL;
     int gpio_sda = GPIO_PIN_SDA;
 
@@ -60,6 +71,7 @@ static void setupWire()
         Wire.setClock(400000);
         i2c_enabled = true;
     }
+#endif
 }
 
 void setupTargetCommon()
