@@ -17,6 +17,7 @@ void servoNewChannelsAvailable();
 void servoCurrentToFailsafeConfig();
 
 #if defined(M0139)
+constexpr uint16_t MODAL_PWM_FAILSAFE_BASE_US = 800U;
 bool servoApplyConfig(const modal_pwm_config_t &newConfig);
 bool servoOverrideChannel(const modal_pwm_override_t &overrideValue);
 uint16_t servoGetLastOutputUs(uint8_t ch);

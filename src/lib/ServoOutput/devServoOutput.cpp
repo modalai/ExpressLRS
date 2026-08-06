@@ -45,9 +45,9 @@ static uint16_t interpolate(uint16_t x, uint16_t x1, uint16_t y1, uint16_t x2, u
         return y1;
     }
 
-    const int32_t outputDelta = (int32_t)y2 - y1;
-    const int32_t value = y1 + ((int32_t)(x - x1) * outputDelta) / (x2 - x1);
-    return constrain(value, 0, UINT16_MAX);
+    const float ratio = (float)(x - x1) / (float)(x2 - x1);
+    const float value = (float)y1 + ratio * (float)((int32_t)y2 - y1);
+    return (uint16_t)value;
 }
 
 static uint16_t mapChannelValue(const rx_config_pwm_t *cfg, uint16_t input)
@@ -201,7 +201,11 @@ static void servoFailsafeChannel(uint8_t ch)
     const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
     if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION)
     {
+#if defined(M0139)
+        servoWrite(ch, chConfig->val.failsafe + MODAL_PWM_FAILSAFE_BASE_US);
+#else
         servoWrite(ch, chConfig->val.failsafe + US_CHANNEL_VALUE_MIN);
+#endif
     }
     else if (chConfig->val.failsafeMode == PWMFAILSAFE_NO_PULSES)
     {
@@ -279,7 +283,11 @@ static void servoUsToFailsafeConfig(uint8_t ch, uint16_t us)
 {
     rx_config_pwm_t newPwmCh;
     newPwmCh = *config.GetPwmChannel(ch);
+#if defined(M0139)
+    newPwmCh.val.failsafe = constrain(us, MODAL_PWM_FAILSAFE_BASE_US, 2200U) - MODAL_PWM_FAILSAFE_BASE_US;
+#else
     newPwmCh.val.failsafe = constrain(us, US_CHANNEL_VALUE_MIN, US_CHANNEL_VALUE_MAX) - US_CHANNEL_VALUE_MIN;
+#endif
     //DBGLN("FSCH(%u) us=%u", ch, us);
     config.SetPwmChannelRaw(ch, newPwmCh.raw);
 }
@@ -521,9 +529,7 @@ bool servoApplyConfig(const modal_pwm_config_t &newConfig)
     }
 
     rx_config_pwm_t channel = *config.GetPwmChannel(newConfig.pinIndex);
-    constexpr uint16_t legacyFailsafeBase = 800;
-    constexpr uint16_t failsafeBaseDelta = legacyFailsafeBase - US_CHANNEL_VALUE_MIN;
-    channel.val.failsafe = constrain((uint32_t)newConfig.failsafe + failsafeBaseDelta, 0U, 2047U);
+    channel.val.failsafe = constrain((uint32_t)newConfig.failsafe, 0U, 2047U);
     channel.val.inputChannel = newConfig.inputChannel;
     channel.val.inverted = newConfig.inverted;
     channel.val.mode = newConfig.mode;

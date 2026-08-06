@@ -14,6 +14,14 @@ uint32_t ChannelData[CRSF_NUM_CHANNELS];      // Current state of channels, CRSF
 
 GENERIC_CRC8 test_crc(CRSF_CRC_POLY);
 
+static char editableValue[7] = "old";
+static bool editableCallbackCalled;
+static stringParameter editableParameter = {
+    {"Editable", CRSF_STRING},
+    editableValue,
+    6
+};
+
 class MockEndpoint : public CRSFEndpoint
 {
 public:
@@ -28,7 +36,18 @@ public:
         uint8_t payload[4] = {0};
         for (size_t i = 0; i < valueSize; ++i)
             payload[i] = static_cast<uint8_t>((value >> ((valueSize - 1 - i) * 8)) & 0xFF);
-        parameterUpdateReq(destAddr, paramId, paramIndex, payload);
+        parameterUpdateReq(destAddr, paramId, paramIndex, payload, valueSize);
+    }
+    void registerEditableParameter()
+    {
+        registerParameter(&editableParameter, [](propertiesCommon *, int32_t) {
+            editableCallbackCalled = true;
+        });
+    }
+    void sendParamBytes(crsf_addr_e destAddr, uint8_t paramId, uint8_t paramIndex,
+                        uint8_t *payload, uint8_t payloadLength)
+    {
+        parameterUpdateReq(destAddr, paramId, paramIndex, payload, payloadLength);
     }
 } crsfEndpoint;
 
@@ -88,11 +107,34 @@ void test_device_info(void)
     TEST_ASSERT_EQUAL(DEVICE_INFORMATION_FRAME_SIZE, header->frame_size);
 
     uint8_t *data = connector.data.data() + sizeof(crsf_ext_header_t);
-    uint8_t compare [] = {'t', 'e', 's', 't', 'i', 'n', 'g', 0x0, 0x45, 0x4c, 0x52, 0x53, 0x0, 0x0, 0x0, 0x0, 0x0, 1, 2, 3, 0x0, 0x0};
+    uint8_t compare [] = {'t', 'e', 's', 't', 'i', 'n', 'g', 0x0, 0x45, 0x4c, 0x52, 0x53, 0x0, 0x0, 0x0, 0x0, 0x0, 1, 2, 3, 0x1, 0x0};
 
     TEST_ASSERT_EQUAL_INT8_ARRAY(compare, data, sizeof(compare));
 
     TEST_ASSERT_EQUAL(test_crc.calc(connector.data.data() + 2, DEVICE_INFORMATION_LENGTH-3), connector.data.data()[DEVICE_INFORMATION_LENGTH - 1]);
+}
+
+void test_writable_string_parameter(void)
+{
+    connector.data.clear();
+    editableCallbackCalled = false;
+    uint8_t readChunk = 0;
+    crsfEndpoint.sendParamBytes(CRSF_ADDRESS_FLIGHT_CONTROLLER, CRSF_FRAMETYPE_PARAMETER_READ,
+                                editableParameter.common.id, &readChunk, sizeof(readChunk));
+
+    const uint8_t *payload = connector.data.data() + sizeof(crsf_ext_header_t);
+    const uint8_t expected[] = {
+        editableParameter.common.id, 0, 0, CRSF_STRING,
+        'E', 'd', 'i', 't', 'a', 'b', 'l', 'e', 0,
+        'o', 'l', 'd', 0, 6
+    };
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, payload, sizeof(expected));
+
+    uint8_t writeValue[] = {'1', '2', '3', '4', '5', '6', '7', '8'};
+    crsfEndpoint.sendParamBytes(CRSF_ADDRESS_FLIGHT_CONTROLLER, CRSF_FRAMETYPE_PARAMETER_WRITE,
+                                editableParameter.common.id, writeValue, sizeof(writeValue));
+    TEST_ASSERT_TRUE(editableCallbackCalled);
+    TEST_ASSERT_EQUAL_STRING("123456", editableValue);
 }
 
 // Unity setup/teardown
@@ -104,10 +146,12 @@ int main(int argc, char **argv)
     connector.addDevice(CRSF_ADDRESS_FLIGHT_CONTROLLER); // our connector sends to the FC
     crsfRouter.addConnector(&connector);
     crsfRouter.addEndpoint(&crsfEndpoint);
+    crsfEndpoint.registerEditableParameter();
 
     UNITY_BEGIN();
     RUN_TEST(test_ver_to_u32);
     RUN_TEST(test_device_info);
+    RUN_TEST(test_writable_string_parameter);
     UNITY_END();
 
     return 0;

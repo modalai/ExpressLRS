@@ -20,6 +20,699 @@ extern bool BindingModeRequest;
 
 extern RXEndpoint crsfReceiver;
 
+#if defined(M0139)
+
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static char strPowerLevels[] = "10;25;50;100;250;500;1000;2000;MatchTX ";
+static char modelString[] = "000";
+static char uidString[(UID_LEN * 2) + 1];
+
+static selectionParameter luaSerialProtocol = {
+    {"Protocol", CRSF_TEXT_SELECTION},
+    0,
+    "CRSF;Inverted CRSF;SBUS;Inverted SBUS;SUMD;DJI RS Pro;HoTT Telemetry;MAVLink;IBus",
+    STR_EMPTYSPACE
+};
+
+static selectionParameter luaSBUSFailsafeMode = {
+    {"SBUS failsafe", CRSF_TEXT_SELECTION},
+    0,
+    "No Pulses;Last Pos",
+    STR_EMPTYSPACE
+};
+
+static int8Parameter luaTargetSysId = {
+    {"Target SysID", CRSF_UINT8},
+    {{1, 1, 255}},
+    STR_EMPTYSPACE
+};
+
+static int8Parameter luaSourceSysId = {
+    {"Source SysID", CRSF_UINT8},
+    {{255, 1, 255}},
+    STR_EMPTYSPACE
+};
+
+static selectionParameter luaDiversityMode = {
+    {"Rx Mode", CRSF_TEXT_SELECTION},
+    0,
+    "Diversity;Gemini",
+    STR_EMPTYSPACE
+};
+
+static folderParameter luaTeamraceFolder = {
+    {"Team Race", CRSF_FOLDER}
+};
+
+static selectionParameter luaTeamraceChannel = {
+    {"Channel", CRSF_TEXT_SELECTION},
+    0,
+    "AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
+    STR_EMPTYSPACE
+};
+
+static selectionParameter luaTeamracePosition = {
+    {"Position", CRSF_TEXT_SELECTION},
+    0,
+    "Disabled;1/Low;2;3;Mid;4;5;6/High",
+    STR_EMPTYSPACE
+};
+
+static folderParameter luaCustomDomainFolder = {
+    {"Custom Domain", CRSF_FOLDER}
+};
+
+static selectionParameter luaCustomDomainEnable = {
+    {"Enable", CRSF_TEXT_SELECTION},
+    0,
+    "Off;On",
+    STR_EMPTYSPACE
+};
+
+static int16Parameter luaCustomDomainStart = {
+    {"Start MHz", CRSF_UINT16},
+    {{htobe16(915), htobe16(410), htobe16(1019)}},
+    "MHz"
+};
+
+static int16Parameter luaCustomDomainEnd = {
+    {"End MHz", CRSF_UINT16},
+    {{htobe16(928), htobe16(411), htobe16(1020)}},
+    "MHz"
+};
+
+static int8Parameter luaCustomDomainChannels = {
+    {"Channels", CRSF_UINT8},
+    {{20, 2, 255}},
+    "ch"
+};
+
+static selectionParameter luaPwmArmed = {
+    {"PWM Armed", CRSF_TEXT_SELECTION},
+    0,
+    "Disarmed;Armed",
+    STR_EMPTYSPACE
+};
+
+static folderParameter luaMappingFolder = {
+    {"Output Mapping", CRSF_FOLDER}
+};
+
+static folderParameter luaPinFolders[4] = {
+    {{"Pin 1", CRSF_FOLDER}},
+    {{"Pin 2", CRSF_FOLDER}},
+    {{"Pin 3", CRSF_FOLDER}},
+    {{"Pin 4", CRSF_FOLDER}}
+};
+
+#define PWM_INPUT_PARAMETER \
+    {{"Input Channel", CRSF_UINT8}, {{1, 1, CRSF_NUM_CHANNELS}}, STR_EMPTYSPACE}
+static int8Parameter luaPwmInputChannel[4] = {
+    PWM_INPUT_PARAMETER, PWM_INPUT_PARAMETER, PWM_INPUT_PARAMETER, PWM_INPUT_PARAMETER
+};
+#undef PWM_INPUT_PARAMETER
+
+static char luaPwmInputValueText[4][8] = {"----", "----", "----", "----"};
+static stringParameter luaPwmInputValue[4] = {
+    {{"Input Value", CRSF_STRING}, luaPwmInputValueText[0], 6},
+    {{"Input Value", CRSF_STRING}, luaPwmInputValueText[1], 6},
+    {{"Input Value", CRSF_STRING}, luaPwmInputValueText[2], 6},
+    {{"Input Value", CRSF_STRING}, luaPwmInputValueText[3], 6}
+};
+
+static char luaPwmOutputValueText[4][12] = {"n/a", "n/a", "n/a", "n/a"};
+static stringParameter luaPwmOutputValue[4] = {
+    {{"Output Value", CRSF_INFO}, luaPwmOutputValueText[0], 0},
+    {{"Output Value", CRSF_INFO}, luaPwmOutputValueText[1], 0},
+    {{"Output Value", CRSF_INFO}, luaPwmOutputValueText[2], 0},
+    {{"Output Value", CRSF_INFO}, luaPwmOutputValueText[3], 0}
+};
+
+static const char pwmModeOptions[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHz Duty;On/Off";
+static const char offOnOptions[] = "Off;On";
+static const char failsafeModeOptions[] = "Custom;No Pulses;Last Pos";
+static const char mapModeOptions[] = "Off;Step;Interpolate";
+
+#define PWM_SELECTION_PARAMETER(label, options) \
+    {{label, CRSF_TEXT_SELECTION}, 0, options, STR_EMPTYSPACE}
+static selectionParameter luaPwmMode[4] = {
+    PWM_SELECTION_PARAMETER("Output Mode", pwmModeOptions),
+    PWM_SELECTION_PARAMETER("Output Mode", pwmModeOptions),
+    PWM_SELECTION_PARAMETER("Output Mode", pwmModeOptions),
+    PWM_SELECTION_PARAMETER("Output Mode", pwmModeOptions)
+};
+static selectionParameter luaPwmInvert[4] = {
+    PWM_SELECTION_PARAMETER("Invert Output", offOnOptions),
+    PWM_SELECTION_PARAMETER("Invert Output", offOnOptions),
+    PWM_SELECTION_PARAMETER("Invert Output", offOnOptions),
+    PWM_SELECTION_PARAMETER("Invert Output", offOnOptions)
+};
+static selectionParameter luaPwmNarrow[4] = {
+    PWM_SELECTION_PARAMETER("Narrow Pulse", offOnOptions),
+    PWM_SELECTION_PARAMETER("Narrow Pulse", offOnOptions),
+    PWM_SELECTION_PARAMETER("Narrow Pulse", offOnOptions),
+    PWM_SELECTION_PARAMETER("Narrow Pulse", offOnOptions)
+};
+static selectionParameter luaPwmFailsafeMode[4] = {
+    PWM_SELECTION_PARAMETER("Failsafe Mode", failsafeModeOptions),
+    PWM_SELECTION_PARAMETER("Failsafe Mode", failsafeModeOptions),
+    PWM_SELECTION_PARAMETER("Failsafe Mode", failsafeModeOptions),
+    PWM_SELECTION_PARAMETER("Failsafe Mode", failsafeModeOptions)
+};
+static selectionParameter luaPwmMapMode[4] = {
+    PWM_SELECTION_PARAMETER("Map Mode", mapModeOptions),
+    PWM_SELECTION_PARAMETER("Map Mode", mapModeOptions),
+    PWM_SELECTION_PARAMETER("Map Mode", mapModeOptions),
+    PWM_SELECTION_PARAMETER("Map Mode", mapModeOptions)
+};
+static selectionParameter luaPwmRequiresArm[4] = {
+    PWM_SELECTION_PARAMETER("Requires Arm", offOnOptions),
+    PWM_SELECTION_PARAMETER("Requires Arm", offOnOptions),
+    PWM_SELECTION_PARAMETER("Requires Arm", offOnOptions),
+    PWM_SELECTION_PARAMETER("Requires Arm", offOnOptions)
+};
+#undef PWM_SELECTION_PARAMETER
+
+#define PWM_FAILSAFE_PARAMETER \
+    {{"Failsafe (us)", CRSF_UINT16}, {{htobe16(1500), htobe16(988), htobe16(2100)}}, "us"}
+static int16Parameter luaPwmFailsafeValue[4] = {
+    PWM_FAILSAFE_PARAMETER, PWM_FAILSAFE_PARAMETER, PWM_FAILSAFE_PARAMETER, PWM_FAILSAFE_PARAMETER
+};
+#undef PWM_FAILSAFE_PARAMETER
+
+static char luaPwmMapValuesText[4][20];
+static stringParameter luaPwmMapValues[4] = {
+    {{"Map Values", CRSF_STRING}, luaPwmMapValuesText[0], 16},
+    {{"Map Values", CRSF_STRING}, luaPwmMapValuesText[1], 16},
+    {{"Map Values", CRSF_STRING}, luaPwmMapValuesText[2], 16},
+    {{"Map Values", CRSF_STRING}, luaPwmMapValuesText[3], 16}
+};
+
+static selectionParameter luaBindStorage = {
+    {"Bind Storage", CRSF_TEXT_SELECTION},
+    0,
+    "Persistent;Volatile;Returnable",
+    STR_EMPTYSPACE
+};
+
+static commandParameter luaBindMode = {
+    {"Bind", CRSF_COMMAND},
+    lcsIdle,
+    STR_EMPTYSPACE
+};
+
+static commandParameter luaUnbindMode = {
+    {"Unbind", CRSF_COMMAND},
+    lcsIdle,
+    STR_EMPTYSPACE
+};
+
+static selectionParameter luaTlmPower = {
+    {"Tlm Power", CRSF_TEXT_SELECTION},
+    0,
+    strPowerLevels,
+    "mW"
+};
+
+static stringParameter luaUid = {
+    {"UID", CRSF_STRING},
+    uidString,
+    UID_LEN * 2
+};
+
+static stringParameter luaModelNumber = {
+    {"Model Id", CRSF_INFO},
+    modelString,
+    0
+};
+
+static stringParameter luaVersion = {
+    {"Version", CRSF_INFO},
+    version,
+    0
+};
+
+static stringParameter luaCommitHash = {
+    {"Commit Hash", CRSF_INFO},
+    commit,
+    0
+};
+
+static uint8_t pwmParameterPin(const propertiesCommon *item, const void *first, size_t itemSize)
+{
+    return ((const uint8_t *)item - (const uint8_t *)first) / itemSize;
+}
+
+static bool pwmParameterInArray(const propertiesCommon *item, const void *first, size_t itemSize)
+{
+    const uintptr_t address = (uintptr_t)item;
+    const uintptr_t begin = (uintptr_t)first;
+    return address >= begin && address < begin + (itemSize * 4);
+}
+
+static void pwmInputChannelCallback(propertiesCommon *item, int32_t arg)
+{
+    if (arg < 1 || arg > CRSF_NUM_CHANNELS)
+    {
+        return;
+    }
+    const uint8_t pin = pwmParameterPin(item, luaPwmInputChannel, sizeof(luaPwmInputChannel[0]));
+    rx_config_pwm_t channel = *config.GetPwmChannel(pin);
+    channel.val.inputChannel = arg - 1;
+    config.SetPwmChannelRaw(pin, channel.raw);
+}
+
+static void pwmFieldCallback(propertiesCommon *item, int32_t arg)
+{
+    const void *parameters;
+    size_t itemSize;
+    enum PwmField : uint8_t { mode, inverted, narrow, failsafeMode, mapMode, requiresArm } field;
+    if (pwmParameterInArray(item, luaPwmMode, sizeof(luaPwmMode[0])))
+    {
+        parameters = luaPwmMode;
+        itemSize = sizeof(luaPwmMode[0]);
+        field = mode;
+    }
+    else if (pwmParameterInArray(item, luaPwmInvert, sizeof(luaPwmInvert[0])))
+    {
+        parameters = luaPwmInvert;
+        itemSize = sizeof(luaPwmInvert[0]);
+        field = inverted;
+    }
+    else if (pwmParameterInArray(item, luaPwmNarrow, sizeof(luaPwmNarrow[0])))
+    {
+        parameters = luaPwmNarrow;
+        itemSize = sizeof(luaPwmNarrow[0]);
+        field = narrow;
+    }
+    else if (pwmParameterInArray(item, luaPwmFailsafeMode, sizeof(luaPwmFailsafeMode[0])))
+    {
+        parameters = luaPwmFailsafeMode;
+        itemSize = sizeof(luaPwmFailsafeMode[0]);
+        field = failsafeMode;
+    }
+    else if (pwmParameterInArray(item, luaPwmMapMode, sizeof(luaPwmMapMode[0])))
+    {
+        parameters = luaPwmMapMode;
+        itemSize = sizeof(luaPwmMapMode[0]);
+        field = mapMode;
+    }
+    else
+    {
+        parameters = luaPwmRequiresArm;
+        itemSize = sizeof(luaPwmRequiresArm[0]);
+        field = requiresArm;
+    }
+
+    const uint8_t pin = pwmParameterPin(item, parameters, itemSize);
+    rx_config_pwm_t channel = *config.GetPwmChannel(pin);
+    switch (field)
+    {
+    case mode: channel.val.mode = arg; break;
+    case inverted: channel.val.inverted = arg; break;
+    case narrow: channel.val.narrow = arg; break;
+    case failsafeMode: channel.val.failsafeMode = arg; break;
+    case mapMode: channel.val.mapMode = arg; break;
+    case requiresArm: channel.val.requiresArm = arg; break;
+    }
+    config.SetPwmChannelRaw(pin, channel.raw);
+}
+
+static void pwmFailsafeValueCallback(propertiesCommon *item, int32_t arg)
+{
+    const uint8_t pin = pwmParameterPin(item, luaPwmFailsafeValue, sizeof(luaPwmFailsafeValue[0]));
+    const uint16_t value = constrain(arg, 800, 2200);
+    rx_config_pwm_t channel = *config.GetPwmChannel(pin);
+    channel.val.failsafe = constrain(value - MODAL_PWM_FAILSAFE_BASE_US, 0, 0x7FF);
+    config.SetPwmChannelRaw(pin, channel.raw);
+}
+
+static void formatMapValues(const rx_config_pwm_t *channel, char *output)
+{
+    uint64_t packed = ((uint64_t)(channel->val.mapInVal1 & 0x3FFU) << 0)
+                    | ((uint64_t)(channel->val.mapInVal2 & 0x3FFU) << 10)
+                    | ((uint64_t)(channel->val.mapInVal3 & 0x3FFU) << 20)
+                    | ((uint64_t)(channel->val.mapOutVal1 & 0x7FFU) << 30)
+                    | ((uint64_t)(channel->val.mapOutVal2 & 0x7FFU) << 41)
+                    | ((uint64_t)(channel->val.mapOutVal3 & 0x7FFU) << 52)
+                    | ((uint64_t)(channel->val.extra & 0x1U) << 63);
+    static const char hex[] = "0123456789ABCDEF";
+    for (int8_t i = 15; i >= 0; --i)
+    {
+        output[i] = hex[packed & 0xFU];
+        packed >>= 4;
+    }
+    output[16] = '\0';
+}
+
+static int8_t hexToNibble(char value)
+{
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    return -1;
+}
+
+static bool parseMapValues(const char *input, rx_config_pwm_t &channel)
+{
+    if (strlen(input) != 16)
+    {
+        return false;
+    }
+
+    uint64_t packed = 0;
+    for (uint8_t i = 0; i < 16; ++i)
+    {
+        const int8_t nibble = hexToNibble(input[i]);
+        if (nibble < 0) return false;
+        packed = (packed << 4) | nibble;
+    }
+
+    channel.val.mapInVal1 = (packed >> 0) & 0x3FFU;
+    channel.val.mapInVal2 = (packed >> 10) & 0x3FFU;
+    channel.val.mapInVal3 = (packed >> 20) & 0x3FFU;
+    channel.val.mapOutVal1 = (packed >> 30) & 0x7FFU;
+    channel.val.mapOutVal2 = (packed >> 41) & 0x7FFU;
+    channel.val.mapOutVal3 = (packed >> 52) & 0x7FFU;
+    channel.val.extra = (packed >> 63) & 0x1U;
+    return true;
+}
+
+static void pwmMapValuesCallback(propertiesCommon *item, int32_t arg)
+{
+    UNUSED(arg);
+    const uint8_t pin = pwmParameterPin(item, luaPwmMapValues, sizeof(luaPwmMapValues[0]));
+    rx_config_pwm_t channel = *config.GetPwmChannel(pin);
+    if (parseMapValues(luaPwmMapValuesText[pin], channel))
+    {
+        config.SetPwmChannelRaw(pin, channel.raw);
+    }
+}
+
+static int16_t crsfToPercent(uint16_t crsf)
+{
+    if (crsf == CRSF_CHANNEL_VALUE_UNSET)
+    {
+        return INT16_MIN;
+    }
+    const int32_t span = CRSF_CHANNEL_VALUE_STD_MAX - CRSF_CHANNEL_VALUE_STD_MIN;
+    return ((int32_t)(crsf - CRSF_CHANNEL_VALUE_STD_MIN) * 200) / span - 100;
+}
+
+static uint16_t percentToCrsf(int16_t percent)
+{
+    percent = constrain(percent, (int16_t)-100, (int16_t)100);
+    const int32_t span = CRSF_CHANNEL_VALUE_STD_MAX - CRSF_CHANNEL_VALUE_STD_MIN;
+    return CRSF_CHANNEL_VALUE_STD_MIN + ((int32_t)(percent + 100) * span) / 200;
+}
+
+static void formatInputValue(uint8_t pin)
+{
+    const rx_config_pwm_t *channel = config.GetPwmChannel(pin);
+    const int16_t percent = crsfToPercent(ChannelData[channel->val.inputChannel]);
+    if (percent == INT16_MIN)
+    {
+        strlcpy(luaPwmInputValueText[pin], "---", sizeof(luaPwmInputValueText[pin]));
+    }
+    else
+    {
+        snprintf(luaPwmInputValueText[pin], sizeof(luaPwmInputValueText[pin]), "%d", percent);
+    }
+}
+
+static void formatOutputValue(uint8_t pin)
+{
+    const rx_config_pwm_t *channel = config.GetPwmChannel(pin);
+    const uint16_t output = servoGetLastOutputUs(pin);
+    if (output == UINT16_MAX || output == 0)
+    {
+        strlcpy(luaPwmOutputValueText[pin], "n/a", sizeof(luaPwmOutputValueText[pin]));
+    }
+    else if (channel->val.mode == somOnOff)
+    {
+        snprintf(luaPwmOutputValueText[pin], sizeof(luaPwmOutputValueText[pin]), "%u", output > 1500);
+    }
+    else if (channel->val.mode == som10KHzDuty)
+    {
+        const int16_t percent = ((constrain(output, 1000, 2000) - 1000) * 100 + 500) / 1000;
+        snprintf(luaPwmOutputValueText[pin], sizeof(luaPwmOutputValueText[pin]), "%d%%", percent);
+    }
+    else
+    {
+        snprintf(luaPwmOutputValueText[pin], sizeof(luaPwmOutputValueText[pin]), "%u", output);
+    }
+}
+
+static void pwmInputValueCallback(propertiesCommon *item, int32_t arg)
+{
+    UNUSED(arg);
+    const uint8_t pin = pwmParameterPin(item, luaPwmInputValue, sizeof(luaPwmInputValue[0]));
+    char *end;
+    const long percent = strtol(luaPwmInputValueText[pin], &end, 10);
+    if (end == luaPwmInputValueText[pin] || *end != '\0' || percent < -100 || percent > 100)
+    {
+        formatInputValue(pin);
+        return;
+    }
+
+    const uint8_t inputChannel = config.GetPwmChannel(pin)->val.inputChannel;
+    ChannelData[inputChannel] = percentToCrsf(percent);
+    formatInputValue(pin);
+    servoNewChannelsAvailable();
+    devicesTriggerEvent(EVENT_CONFIG_PWM_CHANGE);
+}
+
+static void formatUidString(const uint8_t *uid, char *output)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        output[i * 2] = hex[uid[i] >> 4];
+        output[i * 2 + 1] = hex[uid[i] & 0x0FU];
+    }
+    output[UID_LEN * 2] = '\0';
+}
+
+static bool parseUidString(const char *input, uint8_t *uid)
+{
+    if (strlen(input) != UID_LEN * 2)
+    {
+        return false;
+    }
+    for (uint8_t i = 0; i < UID_LEN * 2; ++i)
+    {
+        const int8_t nibble = hexToNibble(input[i]);
+        if (nibble < 0) return false;
+        if ((i & 1U) == 0) uid[i / 2] = nibble << 4;
+        else uid[i / 2] |= nibble;
+    }
+    return true;
+}
+
+static void uidCallback(propertiesCommon *item, int32_t arg)
+{
+    UNUSED(item);
+    UNUSED(arg);
+    uint8_t uid[UID_LEN] = {};
+    if (!parseUidString(uidString, uid))
+    {
+        formatUidString(config.GetUID(), uidString);
+        return;
+    }
+    if (memcmp(uid, UID, UID_LEN) != 0)
+    {
+        UpdateUID(uid);
+    }
+}
+
+static void setTelemetryPower(propertiesCommon *item, int32_t arg)
+{
+    UNUSED(item);
+    uint8_t power = arg + POWERMGNT::getMinPower();
+    if (power > POWERMGNT::getMaxPower())
+    {
+        power = PWR_MATCH_TX;
+    }
+    config.SetPower(power);
+}
+
+void RXEndpoint::registerParameters()
+{
+    registerParameter(&luaSerialProtocol, [](propertiesCommon *, int32_t arg) {
+        const eSerialProtocol protocol = arg == 8 ? PROTOCOL_IBUS : (eSerialProtocol)arg;
+        config.SetSerialProtocol(protocol);
+        if (config.IsModified())
+        {
+            deferExecutionMillis(100, reconfigureSerial);
+        }
+    });
+    registerParameter(&luaSBUSFailsafeMode, [](propertiesCommon *, int32_t arg) {
+        config.SetFailsafeMode((eFailsafeMode)arg);
+    });
+    registerParameter(&luaTargetSysId, [](propertiesCommon *, int32_t arg) {
+        config.SetTargetSysId(arg);
+    });
+    registerParameter(&luaSourceSysId, [](propertiesCommon *, int32_t arg) {
+        config.SetSourceSysId(arg);
+    });
+
+    if (isDualRadio())
+    {
+        registerParameter(&luaDiversityMode, [](propertiesCommon *, int32_t arg) {
+            config.SetAntennaMode(arg);
+        });
+    }
+
+    registerParameter(&luaTeamraceFolder);
+    registerParameter(&luaTeamraceChannel, [](propertiesCommon *, int32_t arg) {
+        config.SetTeamraceChannel(arg + AUX2);
+    }, luaTeamraceFolder.common.id);
+    registerParameter(&luaTeamracePosition, [](propertiesCommon *, int32_t arg) {
+        config.SetTeamracePosition(arg);
+    }, luaTeamraceFolder.common.id);
+
+    registerParameter(&luaCustomDomainFolder);
+    registerParameter(&luaCustomDomainEnable, [](propertiesCommon *, int32_t arg) {
+        config.SetCustomDomainEnabled(arg != 0);
+    }, luaCustomDomainFolder.common.id);
+    registerParameter(&luaCustomDomainStart, [](propertiesCommon *, int32_t arg) {
+        config.SetCustomDomainStartMHz(arg);
+    }, luaCustomDomainFolder.common.id);
+    registerParameter(&luaCustomDomainEnd, [](propertiesCommon *, int32_t arg) {
+        config.SetCustomDomainEndMHz(arg);
+    }, luaCustomDomainFolder.common.id);
+    registerParameter(&luaCustomDomainChannels, [](propertiesCommon *, int32_t arg) {
+        config.SetCustomDomainChannels(arg);
+    }, luaCustomDomainFolder.common.id);
+
+    registerParameter(&luaPwmArmed, [](propertiesCommon *, int32_t arg) {
+        servoSetArmed(arg != 0);
+    });
+    registerParameter(&luaMappingFolder);
+    for (uint8_t pin = 0; pin < 4; ++pin)
+    {
+        registerParameter(&luaPinFolders[pin], nullptr, luaMappingFolder.common.id);
+        const uint8_t parent = luaPinFolders[pin].common.id;
+        registerParameter(&luaPwmInputChannel[pin], pwmInputChannelCallback, parent);
+        registerParameter(&luaPwmInputValue[pin], pwmInputValueCallback, parent);
+        registerParameter(&luaPwmOutputValue[pin], nullptr, parent);
+        registerParameter(&luaPwmMode[pin], pwmFieldCallback, parent);
+        registerParameter(&luaPwmInvert[pin], pwmFieldCallback, parent);
+        registerParameter(&luaPwmNarrow[pin], pwmFieldCallback, parent);
+        registerParameter(&luaPwmFailsafeMode[pin], pwmFieldCallback, parent);
+        registerParameter(&luaPwmFailsafeValue[pin], pwmFailsafeValueCallback, parent);
+        registerParameter(&luaPwmMapMode[pin], pwmFieldCallback, parent);
+        registerParameter(&luaPwmMapValues[pin], pwmMapValuesCallback, parent);
+        registerParameter(&luaPwmRequiresArm[pin], pwmFieldCallback, parent);
+    }
+
+    registerParameter(&luaBindStorage, [](propertiesCommon *, int32_t arg) {
+        config.SetBindStorage((rx_config_bindstorage_t)arg);
+    });
+    registerParameter(&luaBindMode, [this](propertiesCommon *, int32_t arg) {
+        if (arg == lcsClick)
+        {
+            sendCommandResponse(&luaBindMode, lcsExecuting, "Entering bind mode");
+            deferExecutionMillis(200, EnterBindingModeSafely);
+        }
+        else
+        {
+            sendCommandResponse(&luaBindMode, lcsIdle, STR_EMPTYSPACE);
+        }
+    });
+    registerParameter(&luaUnbindMode, [this](propertiesCommon *, int32_t arg) {
+        if (arg == lcsClick)
+        {
+            sendCommandResponse(&luaUnbindMode, lcsExecuting, "Entering unbind mode");
+            deferExecutionMillis(200, EnterUnbindMode);
+        }
+        else
+        {
+            sendCommandResponse(&luaUnbindMode, lcsIdle, STR_EMPTYSPACE);
+        }
+    });
+
+    filterOptions(&luaTlmPower, POWERMGNT::getMinPower(), POWERMGNT::getMaxPower(), strPowerLevels);
+    if (POWERMGNT::getMinPower() != POWERMGNT::getMaxPower())
+    {
+        strcat(strPowerLevels, ";MatchTX ");
+    }
+    registerParameter(&luaTlmPower, setTelemetryPower);
+    registerParameter(&luaUid, uidCallback);
+    registerParameter(&luaModelNumber);
+    registerParameter(&luaVersion);
+    registerParameter(&luaCommitHash);
+}
+
+void RXEndpoint::updateParameters()
+{
+    const eSerialProtocol protocol = config.GetSerialProtocol();
+    setTextSelectionValue(&luaSerialProtocol, protocol == PROTOCOL_IBUS ? 8 : protocol);
+    setTextSelectionValue(&luaSBUSFailsafeMode, config.GetFailsafeMode());
+    if (isDualRadio())
+    {
+        setTextSelectionValue(&luaDiversityMode, config.GetAntennaMode());
+    }
+
+    setTextSelectionValue(&luaTeamraceChannel, config.GetTeamraceChannel() - AUX2);
+    setTextSelectionValue(&luaTeamracePosition, config.GetTeamracePosition());
+    setTextSelectionValue(&luaCustomDomainEnable, config.GetCustomDomainEnabled());
+    setUint16Value(&luaCustomDomainStart, config.GetCustomDomainStartMHz());
+    setUint16Value(&luaCustomDomainEnd, config.GetCustomDomainEndMHz());
+    setUint8Value(&luaCustomDomainChannels, config.GetCustomDomainChannels());
+    setTextSelectionValue(&luaPwmArmed, servoIsArmed());
+
+    for (uint8_t pin = 0; pin < 4; ++pin)
+    {
+        const rx_config_pwm_t *channel = config.GetPwmChannel(pin);
+        setUint8Value(&luaPwmInputChannel[pin], channel->val.inputChannel + 1);
+        setTextSelectionValue(&luaPwmMode[pin], channel->val.mode);
+        setTextSelectionValue(&luaPwmInvert[pin], channel->val.inverted);
+        setTextSelectionValue(&luaPwmNarrow[pin], channel->val.narrow);
+        setTextSelectionValue(&luaPwmFailsafeMode[pin], channel->val.failsafeMode);
+        setUint16Value(&luaPwmFailsafeValue[pin], channel->val.failsafe + MODAL_PWM_FAILSAFE_BASE_US);
+        setTextSelectionValue(&luaPwmMapMode[pin], channel->val.mapMode);
+        formatMapValues(channel, luaPwmMapValuesText[pin]);
+        setTextSelectionValue(&luaPwmRequiresArm[pin], channel->val.requiresArm);
+        formatInputValue(pin);
+        formatOutputValue(pin);
+    }
+
+    const uint8_t power = config.GetPower() == PWR_MATCH_TX ? POWERMGNT::getMaxPower() + 1 : config.GetPower();
+    setTextSelectionValue(&luaTlmPower, power - POWERMGNT::getMinPower());
+    formatUidString(config.GetUID(), uidString);
+    if (config.GetModelId() == 255)
+    {
+        setStringValue(&luaModelNumber, "Off");
+    }
+    else
+    {
+        itoa(config.GetModelId(), modelString, 10);
+        setStringValue(&luaModelNumber, modelString);
+    }
+    setTextSelectionValue(&luaBindStorage, config.GetBindStorage());
+
+    LUA_FIELD_HIDE(luaSerialProtocol)
+    if (protocol == PROTOCOL_MAVLINK)
+    {
+        setUint8Value(&luaSourceSysId, config.GetSourceSysId() == 0 ? 255 : config.GetSourceSysId());
+        setUint8Value(&luaTargetSysId, config.GetTargetSysId() == 0 ? 1 : config.GetTargetSysId());
+        LUA_FIELD_SHOW(luaSourceSysId)
+        LUA_FIELD_SHOW(luaTargetSysId)
+    }
+    else
+    {
+        LUA_FIELD_HIDE(luaSourceSysId)
+        LUA_FIELD_HIDE(luaTargetSysId)
+    }
+}
+
+#else
+
 #if defined(Regulatory_Domain_EU_CE_2400)
 #if defined(RADIO_LR1121)
 char strPowerLevels[] = "10/10;25/25;25/50;25/100;25/250;25/500;25/1000;25/2000;MatchTX ";
@@ -994,4 +1687,5 @@ void RXEndpoint::updateParameters()
     LUA_FIELD_HIDE(luaTargetSysId)
   }
 }
+#endif // M0139
 #endif

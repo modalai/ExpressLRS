@@ -98,6 +98,7 @@ struct stringParameter
 {
     propertiesCommon common;
     const char *value;
+    uint8_t maxLength;
 } PACKED;
 
 struct folderParameter

@@ -3,7 +3,11 @@
 
 #include "CRSFParameters.h"
 
+#if defined(M0139) && defined(TARGET_RX)
+#define MAX_CRSF_PARAMETERS 80
+#else
 #define MAX_CRSF_PARAMETERS 64
+#endif
 
 #if defined(M0139)
 class CRSFConnector;
@@ -103,8 +107,10 @@ protected:
      * @param parameterType The type of parameter being updated
      * @param parameterIndex The index of the parameter to update
      * @param payload Pointer to the start of the parameter payload or chunk number for multipart parameters
+     * @param payloadLength Number of bytes available at payload
      */
-    void parameterUpdateReq(crsf_addr_e origin, uint8_t parameterType, uint8_t parameterIndex, void *payload);
+    void parameterUpdateReq(crsf_addr_e origin, uint8_t parameterType, uint8_t parameterIndex,
+                            void *payload, uint8_t payloadLength = 1);
 
     /**
      * Sends a command response back to the CRSF network.

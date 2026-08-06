@@ -148,7 +148,13 @@ uint8_t *CRSFEndpoint::int16ParameterToArray(const int16Parameter *parameter, ui
 
 uint8_t *CRSFEndpoint::stringParameterToArray(const stringParameter *parameter, uint8_t *next)
 {
-    return (uint8_t *)stpcpy((char *)next, parameter->value);
+    uint8_t *end = (uint8_t *)stpcpy((char *)next, parameter->value);
+    if ((parameter->common.type & CRSF_FIELD_TYPE_MASK) == CRSF_STRING && parameter->maxLength != 0)
+    {
+        end[1] = parameter->maxLength;
+        return end + 1;
+    }
+    return end;
 }
 
 /**
@@ -282,6 +288,12 @@ void CRSFEndpoint::registerParameter(void *definition, const parameterHandlerCal
         paramDefinitions[0] = (propertiesCommon *)&paramRootFolder;
         paramCallbacks[0] = nullptr;
     }
+    if (lastParameter + 1 >= MAX_CRSF_PARAMETERS)
+    {
+        ERRLN("CRSF parameter limit reached");
+        return;
+    }
+
     // Add the new parameter definition to the list
     const auto p = (propertiesCommon *)definition;
     lastParameter++;
@@ -291,36 +303,84 @@ void CRSFEndpoint::registerParameter(void *definition, const parameterHandlerCal
     paramCallbacks[lastParameter] = callback;
 }
 
-void CRSFEndpoint::parameterUpdateReq(const crsf_addr_e origin, const uint8_t parameterType, const uint8_t parameterIndex, void *payload)
+void CRSFEndpoint::parameterUpdateReq(const crsf_addr_e origin, const uint8_t parameterType,
+                                      const uint8_t parameterIndex, void *payload,
+                                      const uint8_t payloadLength)
 {
-    propertiesCommon *parameter = paramDefinitions[parameterIndex];
     requestOrigin = origin;
-    uint8_t parameterArg = *((uint8_t *)payload);
+
+    if (parameterType == CRSF_FRAMETYPE_DEVICE_PING)
+    {
+        devicePingCalled();
+        sendDeviceInformationPacket();
+        return;
+    }
+
+    if (parameterIndex >= MAX_CRSF_PARAMETERS || parameterIndex > lastParameter || payload == nullptr || payloadLength == 0)
+    {
+        return;
+    }
+
+    propertiesCommon *parameter = paramDefinitions[parameterIndex];
+    if (parameter == nullptr)
+    {
+        return;
+    }
+
+    const uint8_t parameterArg = *((uint8_t *)payload);
 
     switch (parameterType)
     {
     case CRSF_FRAMETYPE_PARAMETER_WRITE:
-        if (parameterIndex < MAX_CRSF_PARAMETERS && paramCallbacks[parameterIndex])
+        if (paramCallbacks[parameterIndex])
         {
             uint8_t *argBytes = (uint8_t*)payload;
             int32_t arg = 0;
-            switch (parameter->type)
+            const uint8_t dataType = parameter->type & CRSF_FIELD_TYPE_MASK;
+            if (dataType == CRSF_STRING)
+            {
+                auto *stringItem = (stringParameter *)parameter;
+                if (stringItem->maxLength == 0)
+                {
+                    break;
+                }
+
+                char *destination = const_cast<char *>(stringItem->value);
+                uint8_t copied = 0;
+                while (copied < payloadLength && copied < stringItem->maxLength && argBytes[copied] != '\0')
+                {
+                    destination[copied] = argBytes[copied];
+                    ++copied;
+                }
+                destination[copied] = '\0';
+                DBGLN("Set parameter [%s]=%s", parameter->name, destination);
+                paramCallbacks[parameterIndex](parameter, 0);
+                break;
+            }
+
+            if (((dataType == CRSF_UINT32 || dataType == CRSF_INT32) && payloadLength < 4) ||
+                ((dataType == CRSF_UINT16 || dataType == CRSF_INT16) && payloadLength < 2))
+            {
+                break;
+            }
+
+            switch (dataType)
             {
                 case CRSF_UINT32:
                 case CRSF_INT32:
                     arg = (argBytes[0] << 24) | (argBytes[1] << 16) | (argBytes[2] << 8) | argBytes[3];
-                    if (parameter->type == CRSF_INT32) arg = (int32_t)arg;
+                    if (dataType == CRSF_INT32) arg = (int32_t)arg;
                     break;
                 case CRSF_UINT16:
                 case CRSF_INT16:
                     arg = (argBytes[0] << 8) | argBytes[1];
-                    if (parameter->type == CRSF_INT16) arg = (int16_t)arg;
+                    if (dataType == CRSF_INT16) arg = (int16_t)arg;
                     break;
                 case CRSF_UINT8:
                 case CRSF_INT8:
                 default:
                     arg = argBytes[0];
-                    if (parameter->type == CRSF_INT8) arg = (int8_t)arg;
+                    if (dataType == CRSF_INT8) arg = (int8_t)arg;
                     break;
             }
             DBGLN("Set parameter [%s]=%u", parameter->name, arg);
@@ -339,14 +399,9 @@ void CRSFEndpoint::parameterUpdateReq(const crsf_addr_e origin, const uint8_t pa
         }
         break;
 
-    case CRSF_FRAMETYPE_DEVICE_PING:
-        devicePingCalled();
-        sendDeviceInformationPacket();
-        break;
-
     case CRSF_FRAMETYPE_PARAMETER_READ: {
         DBGVLN("Read parameter %u %u", parameterIndex, parameterArg);
-        if (parameterIndex < MAX_CRSF_PARAMETERS && parameter)
+        if (parameter)
         {
             const auto field = (commandParameter *)parameter;
             const uint8_t dataType = field->common.type & CRSF_FIELD_TYPE_MASK;

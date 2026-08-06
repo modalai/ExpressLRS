@@ -84,7 +84,8 @@ void TXModuleEndpoint::handleMessage(const crsf_header_t *message)
                 supressCriticalErrors();
             }
         }
-        parameterUpdateReq(extMessage->orig_addr, packetType, extMessage->payload[0], extMessage->payload + 1);
+        parameterUpdateReq(extMessage->orig_addr, packetType, extMessage->payload[0],
+                           extMessage->payload + 1, message->frame_size >= 5 ? message->frame_size - 5 : 0);
     }
 }
 
