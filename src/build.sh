@@ -7,6 +7,7 @@ MODALAI_REVISION=""
 TARGET_ALIAS=""
 ENCRYPT_KEY=""
 BUILD_FACTORY=0
+BOARD_CONFIG=""
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$SCRIPT_DIR"
@@ -15,7 +16,7 @@ usage()
 {
     echo "Build one ModalAI ExpressLRS v4 artifact."
     echo "Usage: ./build.sh -t TARGET [-v REVISION] [-e KEY] [--factory]"
-    echo "Use a target such as m0184_rx, m0193_tx_jlink, or m0184_hwil_rx."
+    echo "Use a target such as m0184_rx, m0193_tx_jlink, m0184_hwil_rx, or betafpv_900_rx."
 }
 
 while [ "$#" -gt 0 ]; do
@@ -66,6 +67,10 @@ case "$TARGET_ALIAS" in
     m0184_hwil_tx) ENVIRONMENT="MODALAI_M0184_HWIL_TX_via_UART"; PRODUCT="MODALAI_M0184_HWIL_TX"; BOOTLOADER_ENV="" ;;
     m0193_hwil_rx) ENVIRONMENT="MODALAI_M0193_HWIL_RX_via_UART"; PRODUCT="MODALAI_M0193_HWIL_RX"; BOOTLOADER_ENV="" ;;
     m0193_hwil_tx) ENVIRONMENT="MODALAI_M0193_HWIL_TX_via_UART"; PRODUCT="MODALAI_M0193_HWIL_TX"; BOOTLOADER_ENV="" ;;
+    # Upstream ESP8285 Unified target. BOARD_CONFIG bakes the hardware layout into
+    # the image so the build stays non-interactive; without it the Unified build
+    # prompts for a board (or silently goes "bare" when stdin is not a tty).
+    betafpv_900_rx) ENVIRONMENT="Unified_ESP8285_900_RX_via_UART"; PRODUCT="BETAFPV_900_RX"; BOOTLOADER_ENV=""; BOARD_CONFIG="betafpv.rx_900.nano" ;;
     *)
         echo "Unknown ModalAI target: $TARGET_ALIAS" >&2
         exit 1
@@ -100,6 +105,10 @@ ARTIFACT_DIR="artifacts/${RELEASE_VERSION}/${ENVIRONMENT}"
 ARTIFACT_NAME="${PRODUCT}-${RELEASE_VERSION}.bin"
 
 echo "Build ${ENVIRONMENT} as ${RELEASE_VERSION}."
+if [ -n "$BOARD_CONFIG" ]; then
+    echo "Load the ${BOARD_CONFIG} hardware layout."
+    export ELRS_BOARD_CONFIG="$BOARD_CONFIG"
+fi
 MODALAI_RELEASE_VERSION="$RELEASE_VERSION" pio run -e "$ENVIRONMENT"
 
 SOURCE_BIN="${BUILD_DIR}/firmware.bin"

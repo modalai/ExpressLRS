@@ -3,6 +3,7 @@
 import argparse
 import re
 import json
+import os
 import struct
 import sys
 
@@ -216,7 +217,7 @@ def doConfiguration(file, defines, config, target_name, device_name, rx_as_tx):
 def appendConfiguration(source, target, env):
     target_name = env.get('PIOENV', '')
     device_name = env.get('DEVICE_NAME', None)
-    config = env.GetProjectOption('board_config', None)
+    config = env.GetProjectOption('board_config', os.getenv('ELRS_BOARD_CONFIG') or None)
     if 'Unified_' not in target_name and config is None:
         return
 

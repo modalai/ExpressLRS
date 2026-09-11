@@ -13,7 +13,7 @@ cd "$SCRIPT_DIR"
 usage()
 {
     echo "Build a ModalAI ExpressLRS artifact set."
-    echo "Usage: ./build_all.sh [--release|--jlink|--hwil|--all] [-v REVISION] [-e KEY] [--factory]"
+    echo "Usage: ./build_all.sh [--release|--jlink|--hwil|--betafpv|--all] [-v REVISION] [-e KEY] [--factory]"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -22,6 +22,7 @@ while [ "$#" -gt 0 ]; do
         --release) MODE="release"; shift ;;
         --jlink) MODE="jlink"; shift ;;
         --hwil) MODE="hwil"; shift ;;
+        --betafpv) MODE="betafpv"; shift ;;
         --all) MODE="all"; shift ;;
         --factory) BUILD_FACTORY=1; shift ;;
         -v)
@@ -38,14 +39,18 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-release_targets=(m0184_rx m0184_tx m0193_rx m0193_tx)
-jlink_targets=(m0184_rx_jlink m0184_tx_jlink m0193_rx_jlink m0193_tx_jlink)
+# betafpv_900_rx stays in the default release set: voxl-elrs CI invokes this
+# script with no arguments and ships whatever lands in artifacts/.
+release_targets=(betafpv_900_rx m0184_rx m0193_rx m0193_tx)
+jlink_targets=(m0184_rx_jlink m0193_rx_jlink m0193_tx_jlink)
 hwil_targets=(m0184_hwil_rx m0184_hwil_tx m0193_hwil_rx m0193_hwil_tx)
+betafpv_targets=(betafpv_900_rx)
 
 case "$MODE" in
     release) targets=("${release_targets[@]}") ;;
     jlink) targets=("${jlink_targets[@]}") ;;
     hwil) targets=("${hwil_targets[@]}") ;;
+    betafpv) targets=("${betafpv_targets[@]}") ;;
     all) targets=("${release_targets[@]}" "${jlink_targets[@]}" "${hwil_targets[@]}") ;;
 esac
 
