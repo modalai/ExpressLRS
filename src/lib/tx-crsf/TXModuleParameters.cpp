@@ -174,17 +174,13 @@ static commandParameter luaBind = {
 #if defined(M0139)
 static char txUidString[UID_LEN * 2 + 1];
 
-static folderParameter luaUidFolder = {
-    {"Transmitter UID", CRSF_FOLDER},
-};
-
 static stringParameter luaUid = {
     {"UID", CRSF_INFO},
     txUidString
 };
 
 static commandParameter luaUnbind = {
-    {"Generate New UID", CRSF_COMMAND},
+    {"Unbind", CRSF_COMMAND},
     lcsIdle,
     STR_EMPTYSPACE
 };
@@ -204,19 +200,19 @@ static selectionParameter luaCustomDomainEnable = {
 
 static int16Parameter luaCustomDomainStart = {
     {"Start MHz", CRSF_UINT16},
-    {{htobe16(915), htobe16(410), htobe16(1019)}},
+    {{htobe16(863), htobe16(410), htobe16(1019)}},
     "MHz"
 };
 
 static int16Parameter luaCustomDomainEnd = {
     {"End MHz", CRSF_UINT16},
-    {{htobe16(928), htobe16(411), htobe16(1020)}},
+    {{htobe16(983), htobe16(411), htobe16(1020)}},
     "MHz"
 };
 
 static int8Parameter luaCustomDomainChannels = {
     {"Channels", CRSF_UINT8},
-    {{20, 2, 255}},
+    {{80, 2, 255}},
     "ch"
 };
 #endif
@@ -576,6 +572,13 @@ void TXModuleEndpoint::handleSimpleSendCmd(propertiesCommon *item, uint8_t arg)
     if ((void *)item == (void *)&luaBind)
     {
       msg = "Binding...";
+#if defined(CUSTOM_DOMAIN_ENABLE)
+      // A custom domain moves the bind frequency off the regulatory domain the
+      // receiver listens on, so the bind packets never land. The command
+      // response is the only feedback the handset shows, so say it here.
+      if (config.GetCustomDomainEnabled())
+        msg = "Custom domain on!";
+#endif
       EnterBindingModeSafely();
     }
     else if ((void *)item == (void *)&luaVtxSend)
@@ -840,6 +843,32 @@ void TXModuleEndpoint::registerParameters()
   auto sendCallback = [&](propertiesCommon *item, const uint8_t arg) { handleSimpleSendCmd(item, arg); };
 
   if (HAS_RADIO) {
+    registerParameter(&luaBind, sendCallback);
+#if defined(M0139)
+    registerParameter(&luaUnbind, [this](propertiesCommon *item, int32_t arg) {
+      if (arg == lcsClick)
+      {
+        sendCommandResponse(&luaUnbind, lcsAskConfirm, "Generate new UID?");
+      }
+      else if (arg == lcsConfirmed)
+      {
+        sendCommandResponse(&luaUnbind, lcsExecuting, "Generating...");
+        deferExecutionMillis(200, EnterUnbindMode);
+      }
+      else
+      {
+        sendCommandResponse(&luaUnbind, lcsIdle, STR_EMPTYSPACE);
+      }
+    });
+#endif
+  }
+
+  registerParameter(&luaELRSversion);
+#if defined(M0139)
+  registerParameter(&luaUid);
+#endif
+
+  if (HAS_RADIO) {
 #if defined(RADIO_LR1121)
     // Only allow selection of the band if both bands have power values defined
     if (POWER_OUTPUT_VALUES_COUNT != 0 && POWER_OUTPUT_VALUES_DUAL_COUNT != 0)
@@ -1046,32 +1075,6 @@ void TXModuleEndpoint::registerParameters()
   registerParameter(&luaBLEJoystick, wifiBleCallback);
   #endif
 #endif
-
-  if (HAS_RADIO) {
-    registerParameter(&luaBind, sendCallback);
-  }
-
-#if defined(M0139)
-  registerParameter(&luaUidFolder);
-  registerParameter(&luaUid, nullptr, luaUidFolder.common.id);
-  registerParameter(&luaUnbind, [this](propertiesCommon *item, int32_t arg) {
-    if (arg == lcsClick)
-    {
-      sendCommandResponse(&luaUnbind, lcsAskConfirm, "Generate new UID?");
-    }
-    else if (arg == lcsConfirmed)
-    {
-      sendCommandResponse(&luaUnbind, lcsExecuting, "Generating...");
-      deferExecutionMillis(200, EnterUnbindMode);
-    }
-    else
-    {
-      sendCommandResponse(&luaUnbind, lcsIdle, STR_EMPTYSPACE);
-    }
-  }, luaUidFolder.common.id);
-#endif
-
-  registerParameter(&luaELRSversion);
 }
 
 void TXModuleEndpoint::updateParameters()

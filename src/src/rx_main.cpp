@@ -201,6 +201,10 @@ uint32_t RFmodeLastCycled = 0;
 #define RFmodeCycleMultiplierSlow 10
 uint8_t RFmodeCycleMultiplier;
 bool LockRFmode = false;
+// Counts every connect/disconnect transition since boot. A link that "flops" racks these
+// up while the RX never reboots, which is what distinguishes flopping from a reset loop.
+static uint16_t diagConnCount = 0;
+static uint16_t diagLostCount = 0;
 ///////////////////////////////////////
 
 #if defined(DEBUG_BF_LINK_STATS)
@@ -225,6 +229,35 @@ void reconfigureSerial();
 uint8_t getLq()
 {
     return LQCalc.getLQ();
+}
+
+void GetRxLinkDiag(char *out, size_t len)
+{
+    // Single letter for the connection state so the whole snapshot fits in a CRSF INFO
+    // string: Conn / Tentative / Await / Disc.
+    char state;
+    switch (connectionState)
+    {
+        case connected:   state = 'C'; break;
+        case tentative:   state = 'T'; break;
+        case disconnected:state = 'D'; break;
+        default:          state = '?'; break;
+    }
+
+    // lq is the raw count of CRC-good packets in the last 100 slots, which is what
+    // minLqForChaos() is compared against -- not the smoothed value sent to the FC.
+    // f/r/s are the FHSS index, the rate the radio is actually configured for, and the
+    // rate cycleRfMode() will try next; if the link is stuck they stop moving.
+    snprintf(out, len, "%c lq%u f%u r%u s%u o%d L%u c%u/%u",
+             state,
+             (unsigned)LQCalc.getLQRaw(),
+             (unsigned)FHSSgetCurrIndex(),
+             (unsigned)ExpressLRS_currAirRate_Modparams->index,
+             (unsigned)(scanIndex % RATE_MAX),
+             (int)LPF_Offset.value(),
+             (unsigned)LockRFmode,
+             (unsigned)diagConnCount,
+             (unsigned)diagLostCount);
 }
 
 static inline void checkGeminiMode()
@@ -810,6 +843,9 @@ void LostConnection(bool resumeRx)
 {
     DBGLN("lost conn fc=%d fo=%d", FreqCorrection, hwTimer::getFreqOffset());
 
+    if (connectionState == connected || connectionState == tentative)
+        diagLostCount++;
+
     setConnectionState(disconnected); //set lost connection
     RXtimerState = tim_disconnected;
     hwTimer::resetFreqOffset();
@@ -873,6 +909,7 @@ void GotConnection(unsigned long now)
     }
 
     LockRFmode = firmwareOptions.lock_on_first_connection;
+    diagConnCount++;
 
     setConnectionState(connected); //we got a packet, therefore no lost connection
     RXtimerState = tim_tentative;
@@ -923,6 +960,16 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC(OTA_Packet_s const * const otaPkt
 
 void ICACHE_RAM_ATTR OnELRSBindMSP(uint8_t* newUid4)
 {
+    // An all-zero UID is what OtaUidIsBound() reads as "unbound", so accepting one here
+    // wipes the binding and drops the receiver straight back into binding mode, where it
+    // can be wiped again. No transmitter legitimately binds with a zero UID, so ignore it.
+    // This was observed clearing the UID on the ESP8285 whenever a badly broken link made
+    // the receiver reset enough times to trip the 3-plug bind counter.
+    if (!newUid4[0] && !newUid4[1] && !newUid4[2] && !newUid4[3])
+    {
+        return;
+    }
+
     // Binding over MSP only contains 4 bytes due to packet size limitations, clear out any leading bytes
     UID[0] = 0;
     UID[1] = 0;
@@ -1859,7 +1906,6 @@ void EnterBindingModeSafely()
     EnterBindingMode();
 }
 
-#if defined(M0139)
 void UpdateUID(const uint8_t *newUid)
 {
     memcpy(UID, newUid, UID_LEN);
@@ -1877,7 +1923,6 @@ void EnterUnbindMode()
     UpdateUID(unboundUid);
     ExitBindingMode();
 }
-#endif
 
 static void checkSendLinkStatsToFc(uint32_t now)
 {

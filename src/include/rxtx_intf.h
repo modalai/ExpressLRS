@@ -10,10 +10,8 @@
  * In both RX and TX builds
  */
 void EnterBindingModeSafely();
-#if defined(M0139)
 void EnterUnbindMode();
 void UpdateUID(const uint8_t *newUid);
-#endif
 void scheduleRebootTime(unsigned long inMs);
 
 /***
@@ -28,4 +26,8 @@ void SetSyncSpam();
  ***/
 #if defined(TARGET_RX)
 uint8_t getLq();
+// Fills a caller-supplied buffer with a one-line snapshot of the acquisition state
+// (connection state, raw LQ, FHSS index, rate index, scan index, phase offset and the
+// running connect/disconnect counts). Everything it reports lives in rx_main statics.
+void GetRxLinkDiag(char *out, size_t len);
 #endif

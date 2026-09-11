@@ -95,19 +95,19 @@ static selectionParameter luaCustomDomainEnable = {
 
 static int16Parameter luaCustomDomainStart = {
     {"Start MHz", CRSF_UINT16},
-    {{htobe16(915), htobe16(410), htobe16(1019)}},
+    {{htobe16(863), htobe16(410), htobe16(1019)}},
     "MHz"
 };
 
 static int16Parameter luaCustomDomainEnd = {
     {"End MHz", CRSF_UINT16},
-    {{htobe16(928), htobe16(411), htobe16(1020)}},
+    {{htobe16(983), htobe16(411), htobe16(1020)}},
     "MHz"
 };
 
 static int8Parameter luaCustomDomainChannels = {
     {"Channels", CRSF_UINT8},
-    {{20, 2, 255}},
+    {{80, 2, 255}},
     "ch"
 };
 
@@ -616,7 +616,14 @@ void RXEndpoint::registerParameters()
     registerParameter(&luaBindMode, [this](propertiesCommon *, int32_t arg) {
         if (arg == lcsClick)
         {
-            sendCommandResponse(&luaBindMode, lcsExecuting, "Entering bind mode");
+            const char *msg = "Entering bind mode";
+#if defined(CUSTOM_DOMAIN_ENABLE)
+            // A custom domain moves the bind frequency off the regulatory domain
+            // the other end listens on, so the bind packets never land.
+            if (config.GetCustomDomainEnabled())
+                msg = "Custom domain on!";
+#endif
+            sendCommandResponse(&luaBindMode, lcsExecuting, msg);
             deferExecutionMillis(200, EnterBindingModeSafely);
         }
         else
@@ -826,6 +833,104 @@ static stringParameter luaELRSversion = {
     commit
 };
 
+static char rxUidString[(UID_LEN * 2) + 1];
+
+static stringParameter luaRxUid = {
+    {"UID", CRSF_STRING},
+    rxUidString,
+    UID_LEN * 2
+};
+
+static void formatRxUidString(const uint8_t *uid, char *output)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        output[i * 2] = hex[uid[i] >> 4];
+        output[i * 2 + 1] = hex[uid[i] & 0x0FU];
+    }
+    output[UID_LEN * 2] = '\0';
+}
+
+// Parses exactly UID_LEN*2 hex digits. Returning false on any non-hex character also
+// rejects a short string, since the terminating NUL fails the test.
+static bool parseRxUidString(const char *input, uint8_t *uid)
+{
+    for (uint8_t i = 0; i < UID_LEN * 2; ++i)
+    {
+        const char c = input[i];
+        int8_t nibble;
+        if (c >= '0' && c <= '9') nibble = c - '0';
+        else if (c >= 'A' && c <= 'F') nibble = c - 'A' + 10;
+        else if (c >= 'a' && c <= 'f') nibble = c - 'a' + 10;
+        else return false;
+        if ((i & 1U) == 0) uid[i / 2] = (uint8_t)(nibble << 4);
+        else uid[i / 2] |= (uint8_t)nibble;
+    }
+    return input[UID_LEN * 2] == '\0';
+}
+
+// Diagnostic: why did the receiver last restart, and how far has the 3-plug bind counter
+// advanced. The counter reaching 3 is what makes updateBindingMode() force binding mode,
+// and on ESP8266 it lives in a flash sector rather than in config, so it is otherwise
+// invisible. Needed to tell a reset-driven auto-bind from a stray bind packet.
+static char rxDiagString[64];
+
+static stringParameter luaRxDiag = {
+    {"Diag", CRSF_INFO},
+    rxDiagString
+};
+
+static void updateRxDiagString()
+{
+#if defined(PLATFORM_ESP8266)
+    // The reset reason cannot change while we are running, so read it once. This runs
+    // from updateParameters(), and devRXLUA subscribes to EVENT_ALL -- including
+    // EVENT_CONNECTION_CHANGED, which fires repeatedly while the link is trying to
+    // acquire. ESP.getResetReason() returns a String, so calling it every time churned
+    // the heap inside the acquisition path.
+    static char resetReason[16];
+    if (!resetReason[0])
+    {
+        strncpy(resetReason, ESP.getResetReason().c_str(), sizeof(resetReason) - 1);
+        resetReason[sizeof(resetReason) - 1] = '\0';
+    }
+    const int used = snprintf(rxDiagString, sizeof(rxDiagString), "%s p%u ",
+                              resetReason, config.GetPowerOnCounter());
+#else
+    const int used = snprintf(rxDiagString, sizeof(rxDiagString), "p%u ", config.GetPowerOnCounter());
+#endif
+    // Append the live acquisition state. Reset reason and power-on counter explain a
+    // reboot; this half explains a link that never settles without one.
+    if (used > 0 && (size_t)used < sizeof(rxDiagString))
+    {
+        GetRxLinkDiag(rxDiagString + used, sizeof(rxDiagString) - used);
+    }
+}
+
+static void rxUidCallback(propertiesCommon *item, int32_t arg)
+{
+    UNUSED(item);
+    UNUSED(arg);
+    uint8_t uid[UID_LEN] = {};
+    const uint8_t *current = config.GetUID();
+    // Reject a malformed write, and an all-zero UID: that reads as "unbound" and would
+    // drop the receiver straight back into binding mode. Restore the display either way.
+    if (!parseRxUidString(rxUidString, uid) || !(uid[2] || uid[3] || uid[4] || uid[5]))
+    {
+        formatRxUidString(current, rxUidString);
+        return;
+    }
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        if (uid[i] != current[i])
+        {
+            UpdateUID(uid);
+            return;
+        }
+    }
+}
+
 //----------------------------Info-----------------------------------
 
 //---------------------------- WiFi -----------------------------
@@ -965,15 +1070,17 @@ static commandParameter luaApplyUid = {
     STR_EMPTYSPACE
 };
 
+static uint8_t pendingUid[UID_LEN];
+static bool pendingUidDirty;
+#endif
+
+// Unbind is offered on every receiver, so it lives outside the UID folder block
+// above, which is M0139-only.
 static commandParameter luaUnbind = {
     {"Unbind", CRSF_COMMAND},
     lcsIdle,
     STR_EMPTYSPACE
 };
-
-static uint8_t pendingUid[UID_LEN];
-static bool pendingUidDirty;
-#endif
 
 #if defined(CUSTOM_DOMAIN_ENABLE)
 static folderParameter luaCustomDomainFolder = {
@@ -989,19 +1096,19 @@ static selectionParameter luaCustomDomainEnable = {
 
 static int16Parameter luaCustomDomainStart = {
     {"Start MHz", CRSF_UINT16},
-    {{htobe16(915), htobe16(410), htobe16(1019)}},
+    {{htobe16(863), htobe16(410), htobe16(1019)}},
     "MHz"
 };
 
 static int16Parameter luaCustomDomainEnd = {
     {"End MHz", CRSF_UINT16},
-    {{htobe16(928), htobe16(411), htobe16(1020)}},
+    {{htobe16(983), htobe16(411), htobe16(1020)}},
     "MHz"
 };
 
 static int8Parameter luaCustomDomainChannels = {
     {"Channels", CRSF_UINT8},
-    {{20, 2, 255}},
+    {{80, 2, 255}},
     "ch"
 };
 #endif
@@ -1554,21 +1661,6 @@ void RXEndpoint::registerParameters()
       sendCommandResponse(&luaApplyUid, lcsIdle, STR_EMPTYSPACE);
     }
   }, luaUidFolder.common.id);
-  registerParameter(&luaUnbind, [this](propertiesCommon* item, int32_t arg) {
-    if (arg == lcsClick)
-    {
-      sendCommandResponse(&luaUnbind, lcsAskConfirm, "Unbind receiver?");
-    }
-    else if (arg == lcsConfirmed)
-    {
-      sendCommandResponse(&luaUnbind, lcsExecuting, "Unbinding...");
-      deferExecutionMillis(200, EnterUnbindMode);
-    }
-    else
-    {
-      sendCommandResponse(&luaUnbind, lcsIdle, STR_EMPTYSPACE);
-    }
-  }, luaUidFolder.common.id);
 #endif
 
   registerParameter(&luaBindStorage, [](propertiesCommon* item, uint8_t arg) {
@@ -1577,7 +1669,15 @@ void RXEndpoint::registerParameters()
   registerParameter(&luaBindMode, [this](propertiesCommon* item, uint8_t arg){
     if (arg == lcsClick)
     {
-      sendCommandResponse(&luaBindMode, lcsExecuting, "Entering...");
+      const char *msg = "Entering...";
+#if defined(CUSTOM_DOMAIN_ENABLE)
+      // A custom domain moves the bind frequency off the regulatory domain the
+      // other end listens on, so the bind packets never land. The command
+      // response is the only feedback the handset shows, so say it here.
+      if (config.GetCustomDomainEnabled())
+        msg = "Custom domain on!";
+#endif
+      sendCommandResponse(&luaBindMode, lcsExecuting, msg);
       deferExecutionMillis(200, EnterBindingModeSafely);
     }
     else
@@ -1585,9 +1685,24 @@ void RXEndpoint::registerParameters()
       sendCommandResponse(&luaBindMode, lcsIdle, STR_EMPTYSPACE);
     }
   });
+  registerParameter(&luaUnbind, [this](propertiesCommon* item, int32_t arg) {
+    if (arg == lcsClick)
+    {
+      sendCommandResponse(&luaUnbind, lcsExecuting, "Entering unbind mode");
+      deferExecutionMillis(200, EnterUnbindMode);
+    }
+    else
+    {
+      sendCommandResponse(&luaUnbind, lcsIdle, STR_EMPTYSPACE);
+    }
+  });
 
   registerParameter(&luaModelNumber);
   registerParameter(&luaELRSversion);
+  // Registered last: presets address parameters by raw index, so appending
+  // keeps every existing index stable.
+  registerParameter(&luaRxUid, rxUidCallback);
+  registerParameter(&luaRxDiag);
 }
 
 static void updateBindModeLabel()
@@ -1595,7 +1710,7 @@ static void updateBindModeLabel()
   if (config.IsOnLoan())
     luaBindMode.common.name = "Return Model";
   else
-    luaBindMode.common.name = "Enter Bind Mode";
+    luaBindMode.common.name = "Bind";
 }
 
 void RXEndpoint::updateParameters()
@@ -1673,6 +1788,8 @@ void RXEndpoint::updateParameters()
   }
   setTextSelectionValue(&luaBindStorage, config.GetBindStorage());
   updateBindModeLabel();
+  formatRxUidString(config.GetUID(), rxUidString);
+  updateRxDiagString();
 
   if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
   {
