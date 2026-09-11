@@ -7,10 +7,34 @@
 
 extern void reset_into_bootloader();
 
+/**
+ * @brief Is this frame part of the CRSF device/parameter protocol?
+ *
+ * These are replies to a request a connected host explicitly made (voxl-elrs, a handset,
+ * Betaflight), so they stay available even when team-race has this model deselected. That
+ * keeps the receiver identifiable and configurable while it is inhibited. RC data, link
+ * statistics, telemetry and MSP remain blocked below.
+ */
+static bool isConfigurationFrame(const crsf_header_t *message)
+{
+    switch (message->type)
+    {
+    case CRSF_FRAMETYPE_DEVICE_PING:
+    case CRSF_FRAMETYPE_DEVICE_INFO:
+    case CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY:
+    case CRSF_FRAMETYPE_PARAMETER_READ:
+    case CRSF_FRAMETYPE_PARAMETER_WRITE:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void SerialCRSF::forwardMessage(const crsf_header_t *message)
 {
-    // No MSP data to the FC if team-race is selected and the correct model is not selected
-    if (teamraceHasModelMatch)
+    // No MSP data to the FC if team-race is selected and the correct model is not selected,
+    // but always answer device/parameter requests so the RX can still be configured
+    if (teamraceHasModelMatch || isConfigurationFrame(message))
     {
         auto *data = (uint8_t *)message;
         const uint8_t totalBufferLen = data[CRSF_TELEMETRY_LENGTH_INDEX] + CRSF_FRAME_NOT_COUNTED_BYTES;
