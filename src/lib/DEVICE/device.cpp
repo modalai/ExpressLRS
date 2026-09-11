@@ -143,8 +143,12 @@ static int _devicesUpdate(unsigned long now)
     bool newModelMatch = connectionHasModelMatch && teamraceHasModelMatch;
     uint32_t events = eventFired[coreMulti];
     eventFired[coreMulti] = 0;
-    bool handleEvents = events != 0 || lastModelMatch[coreMulti] != newModelMatch;
+    if (lastModelMatch[coreMulti] != newModelMatch)
+    {
+        events |= EVENT_MODEL_MATCH_CHANGED;
+    }
     lastModelMatch[coreMulti] = newModelMatch;
+    bool handleEvents = events != 0;
 
     if (handleEvents)
     {
