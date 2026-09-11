@@ -20,7 +20,12 @@
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
 #if defined(M0139)
-#define TX_CONFIG_VERSION   10U
+// v11: ExpressLRS v4 widened model_config_t.rate from 4 to 5 bits, shifting every
+// field after it. The ModalAI 3.5.3.x c2-server branch already shipped
+// TX_CONFIG_VERSION 10 with the *old* layout, so a stored v10 config would be
+// accepted by Load() and reinterpreted one bit off (tlm read as 1:2 instead of
+// STD, wrong power/switchMode). Bumped to force SetDefaults() on those units.
+#define TX_CONFIG_VERSION   11U
 #define RX_CONFIG_VERSION   15U
 #else
 #define TX_CONFIG_VERSION   8U

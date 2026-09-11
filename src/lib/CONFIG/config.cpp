@@ -53,6 +53,11 @@ constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_START_MHZ = 410;
 constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ = 525;
 constexpr uint8_t CUSTOM_DOMAIN_MIN_CHANNELS = 2;
 constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_CHANNELS = 20;
+// Factory default custom domain, matching the voxl-elrs custom_domain_{tx,rx} presets.
+// Seeded on every config reset but left disabled until the user turns it on.
+constexpr uint16_t CUSTOM_DOMAIN_DEFAULT_START_MHZ = 863;
+constexpr uint16_t CUSTOM_DOMAIN_DEFAULT_STOP_MHZ = 983;
+constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT = 80;
 
 uint16_t clampCustomDomainMHz(uint16_t value, uint16_t minValue, uint16_t maxValue)
 {
@@ -151,16 +156,14 @@ uint16_t customDomainRegToMHz(uint32_t regFreq)
 }
 
 template <typename TConfig>
-void setCustomDomainFromConfig(TConfig &cfg, const fhss_config_t &domain)
+void setCustomDomainDefaults(TConfig &cfg)
 {
-    const uint16_t startMHz = customDomainRegToMHz(domain.freq_start);
-    const uint16_t endMHz = customDomainRegToMHz(domain.freq_stop);
-    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint8_t band = customDomainBandFromMHz(CUSTOM_DOMAIN_DEFAULT_START_MHZ);
     const uint16_t bandStartMHz = customDomainBandStartMHz(band);
     cfg.custom_domain_band = band;
-    cfg.custom_domain_start = startMHz - bandStartMHz;
-    cfg.custom_domain_end = endMHz - bandStartMHz;
-    cfg.custom_domain_n_channels = domain.freq_count;
+    cfg.custom_domain_start = CUSTOM_DOMAIN_DEFAULT_START_MHZ - bandStartMHz;
+    cfg.custom_domain_end = CUSTOM_DOMAIN_DEFAULT_STOP_MHZ - bandStartMHz;
+    cfg.custom_domain_n_channels = CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT;
     cfg.custom_domain_enable = false;
     normalizeCustomDomain(cfg);
 }
@@ -496,7 +499,25 @@ void TxConfig::Load()
         return;
 
 #if defined(M0139)
-    SetDefaults(true);
+    // Any non-current version is reset rather than reinterpreted. In particular
+    // ExpressLRS v4 reuses TX_CONFIG_VERSION 10, which the ModalAI 3.5.3.x
+    // c2-server branch already shipped with the older model_config_t layout
+    // (rate:4 not rate:5); the two are indistinguishable, so reinterpreting the
+    // bits silently shifts every field after `rate`.
+    // `uid` has been at the same offset in every layout we have shipped (right
+    // after powerFanThreshold, before model_config), so carry it across the
+    // reset -- otherwise SetDefaults() zeroes it and the TX falls back to a
+    // hardware-derived UID, unbinding every receiver in the field.
+    uint8_t savedUid[UID_LEN];
+    const bool haveSavedUid = version != 0;
+    memcpy(savedUid, m_config.uid, UID_LEN);
+    SetDefaults(false);
+    if (haveSavedUid)
+    {
+        memcpy(m_config.uid, savedUid, UID_LEN);
+    }
+    m_modified = ALL_CHANGED;
+    Commit();
     return;
 #endif
 
@@ -937,7 +958,7 @@ TxConfig::SetDefaults(bool commit)
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    setCustomDomainFromConfig(m_config, FHSSgetInitialDomain());
+    setCustomDomainDefaults(m_config);
 #endif
 
     m_config.version = TX_CONFIG_VERSION | TX_CONFIG_MAGIC;
@@ -971,7 +992,11 @@ TxConfig::SetDefaults(bool commit)
     for (unsigned i=0; i<CONFIG_TX_MODEL_CNT; i++)
     {
         SetModelId(i);
-        #if defined(RADIO_SX127X)
+        #if defined(DEFAULT_RATE)
+            // Target-specified default rate (e.g. ModalAI M0193 runs 50Hz), takes
+            // precedence over the per-radio default below
+            SetRate(enumRatetoIndexSafe(DEFAULT_RATE));
+        #elif defined(RADIO_SX127X)
             SetRate(enumRatetoIndexSafe(RATE_LORA_900_200HZ));
         #elif defined(RADIO_LR1121)
             SetRate(enumRatetoIndexSafe(POWER_OUTPUT_VALUES_COUNT == 0 ? RATE_LORA_2G4_250HZ : RATE_LORA_900_200HZ));
@@ -1562,7 +1587,7 @@ RxConfig::SetDefaults(bool commit)
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    setCustomDomainFromConfig(m_config, FHSSgetInitialDomain());
+    setCustomDomainDefaults(m_config);
 #endif
 #if defined(M0139)
     memset(m_config.uid, 0xFF, UID_LEN);
