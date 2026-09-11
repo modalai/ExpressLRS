@@ -18,7 +18,7 @@ extern const int16_t modalaiPowerValues[3];
 #define MinPower                PWR_250mW
 #define MaxPower                PWR_1000mW
 #define DefaultPower            PWR_250mW
-#define DEFAULT_RATE            RATE_LORA_50HZ
+#define DEFAULT_RATE            RATE_LORA_900_50HZ
 
 // -4.2 dbm input to FEM
 // 0 + -4.2+30=25.8 dBm ~= 300mW
