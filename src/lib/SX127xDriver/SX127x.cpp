@@ -707,11 +707,23 @@ void ICACHE_RAM_ATTR SX127xDriver::ProcessPendingRx()
     // inside a critical section on the TX (the deferred decode temporarily rewinds
     // OtaNonce for the CRC check), and unconditionally re-enabling here would expose
     // that rewound value to any radio ISR that fired in the gap.
+    // __get_PRIMASK()/__disable_irq() are CMSIS, so they only exist on STM32. Deferral is
+    // only ever enabled there (see DeferRxIsr in SetRFLinkRate), so on every other target
+    // this runs with pendingRxRadios permanently zero and the nesting concern above cannot
+    // arise -- a plain mask/unmask is enough to keep the read-and-clear atomic.
+#if defined(PLATFORM_STM32)
     const uint32_t primask = __get_PRIMASK();
     __disable_irq();
+#else
+    noInterrupts();
+#endif
     uint8_t pending = pendingRxRadios;
     pendingRxRadios = 0;
+#if defined(PLATFORM_STM32)
     __set_PRIMASK(primask);
+#else
+    interrupts();
+#endif
 
     while (pending)
     {
