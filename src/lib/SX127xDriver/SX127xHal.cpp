@@ -12,8 +12,71 @@
 SX127xHal *SX127xHal::instance = NULL;
 
 #if defined(M0139)
+#include "pinmap.h"
+#include "PeripheralPins.h"
+
 static SPIClass SPI_1;
 static SPIClass SPI_2;
+
+// Direct-register SPI transfer path for the M0139 family.
+//
+// A 2-byte register access through SPIClass::transfer() + digitalWrite() costs
+// ~9us on the STM32F103 (measured with the DWT cycle counter) against ~4us via
+// direct register access; inside the radio ISR, where the UART ISR preempts it,
+// each transaction cost ~20us. The DIO0 ISR does ~14 transactions per received
+// telemetry packet and runs at a higher NVIC priority than the RF timer ISR, so
+// every microsecond spent here delays the transmit instant. SPIClass still owns
+// peripheral configuration (begin/clock/mode); only the byte transfers and the
+// chip-select are done here.
+struct FastSpi
+{
+    SPI_TypeDef *spi;
+    GPIO_TypeDef *nssPort;
+    uint32_t nssPin;
+};
+static FastSpi fastSpi[2];
+
+static void fastSpiInit(FastSpi &f, uint8_t sckPin, uint8_t nssPin)
+{
+    const PinName nss = digitalPinToPinName(nssPin);
+    f.nssPort = get_GPIO_Port(STM_PORT(nss));
+    f.nssPin = STM_LL_GPIO_PIN(nss);
+    f.spi = (SPI_TypeDef *)pinmap_peripheral(digitalPinToPinName(sckPin), PinMap_SPI_SCLK);
+}
+
+// Full-duplex transfer of buf[0..n) with NSS asserted for the whole frame.
+// buf is overwritten with the received bytes.
+//
+// The frame is atomic. Both the radio ISRs and the main loop drive these buses
+// (on the RX nearly all radio access is in ISR context, and the DIO0 EXTI can
+// preempt the RF timer ISR mid-frame). A preempted frame is unrecoverable: the
+// inner transfer consumes the byte the outer one is waiting for, so the outer
+// `while (!RXNE)` never completes and the firmware hangs. A frame is at most
+// PayloadLength+1 bytes, about 12us at 9MHz, so this is a bounded and much
+// smaller interrupt delay than the SPIClass path it replaced.
+static inline void ICACHE_RAM_ATTR fastSpiTransfer(const FastSpi &f, uint8_t *buf, uint8_t n)
+{
+    SPI_TypeDef *const spi = f.spi;
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
+    LL_GPIO_ResetOutputPin(f.nssPort, f.nssPin);
+    // discard anything left in the receive register
+    while (spi->SR & SPI_SR_RXNE)
+    {
+        (void)spi->DR;
+    }
+    for (uint8_t i = 0; i < n; i++)
+    {
+        while (!(spi->SR & SPI_SR_TXE)) {}
+        spi->DR = buf[i];
+        while (!(spi->SR & SPI_SR_RXNE)) {}
+        buf[i] = (uint8_t)spi->DR;
+    }
+    LL_GPIO_SetOutputPin(f.nssPort, f.nssPin);
+
+    __set_PRIMASK(primask);
+}
 #endif
 
 SX127xHal::SX127xHal()
@@ -91,6 +154,10 @@ void SX127xHal::init()
     SPI_2.setDataMode(SPI_MODE0);
     SPI_2.begin();
     SPI_2.setClockDivider(SPI_CLOCK_DIV4);
+
+    fastSpiInit(fastSpi[0], GPIO_PIN_SCK, GPIO_PIN_NSS);
+    fastSpiInit(fastSpi[1], GPIO_PIN_SCK_2, GPIO_PIN_NSS_2);
+
 #endif
 
     attachInterrupt(digitalPinToInterrupt(GPIO_PIN_DIO0), this->dioISR_1, RISING);
@@ -146,15 +213,11 @@ void ICACHE_RAM_ATTR SX127xHal::readRegister(uint8_t reg, uint8_t *data, uint8_t
 #if defined(M0139)
     if (radioNumber & SX12XX_Radio_1)
     {
-        digitalWrite(GPIO_PIN_NSS, LOW);
-        SPI_1.transfer(buf, numBytes + 1);
-        digitalWrite(GPIO_PIN_NSS, HIGH);
+        fastSpiTransfer(fastSpi[0], buf, numBytes + 1);
     }
     else if (radioNumber & SX12XX_Radio_2)
     {
-        digitalWrite(GPIO_PIN_NSS_2, LOW);
-        SPI_2.transfer(buf, numBytes + 1);
-        digitalWrite(GPIO_PIN_NSS_2, HIGH);
+        fastSpiTransfer(fastSpi[1], buf, numBytes + 1);
     }
 #else
     SPIEx.read(radioNumber, buf, numBytes + 1);
@@ -199,15 +262,11 @@ void ICACHE_RAM_ATTR SX127xHal::writeRegister(uint8_t reg, uint8_t *data, uint8_
     }
     if (radioNumber & SX12XX_Radio_1)
     {
-        digitalWrite(GPIO_PIN_NSS, LOW);
-        SPI_1.transfer(buf, numBytes + 1);
-        digitalWrite(GPIO_PIN_NSS, HIGH);
+        fastSpiTransfer(fastSpi[0], buf, numBytes + 1);
     }
     if (radioNumber & SX12XX_Radio_2)
     {
-        digitalWrite(GPIO_PIN_NSS_2, LOW);
-        SPI_2.transfer(buf2, numBytes + 1);
-        digitalWrite(GPIO_PIN_NSS_2, HIGH);
+        fastSpiTransfer(fastSpi[1], buf2, numBytes + 1);
     }
 #else
     SPIEx.write(radioNumber, buf, numBytes + 1);
