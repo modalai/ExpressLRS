@@ -237,7 +237,8 @@ uint8_t CRSFEndpoint::sendParameter(const crsf_addr_e origin, const crsf_frame_t
     // dataEnd points to the end of the last string
     // -2 bytes chunk header: FieldId, ChunksRemain
     // +1 for the null on the last string
-    const uint8_t dataSize = (dataEnd - chunkBuffer) - 2 + 1;
+    // chunkBuffer holds up to 259 payload bytes, so this must not be a uint8_t
+    const uint16_t dataSize = (dataEnd - chunkBuffer) - 2 + 1;
     // Maximum number of chunked bytes that can be sent in one response
     // 6 bytes CRSF header/CRC: Dest, Len, Type, ExtSrc, ExtDst, CRC
     // 2 bytes chunk header: FieldId, ChunksRemain
@@ -246,17 +247,24 @@ uint8_t CRSFEndpoint::sendParameter(const crsf_addr_e origin, const crsf_frame_t
     const uint8_t chunkMax = crsfRouter.getConnectorMaxPacketSize(origin) - 6 - 2;
     // How many chunks needed to send this field (rounded up)
     const uint8_t chunkCnt = (dataSize + chunkMax - 1) / chunkMax;
+    // The parameter is re-serialised on every chunk request, so a field that shrinks
+    // between requests -- updateParameters() rewrites the option/units/dyn_name strings
+    // on every config and connection event -- can leave the requested chunk past the end.
+    // Clamp to the final chunk so the transfer terminates. Letting it through would
+    // underflow chunkCnt - (fieldChunk + 1) to ~255 chunks remaining, and the handset
+    // would keep asking for chunks that never arrive.
+    const uint8_t sendChunk = fieldChunk < chunkCnt ? fieldChunk : (uint8_t)(chunkCnt - 1);
     // Data left to send is adjustedSize - chunks sent already
-    const uint8_t chunkSize = std::min((uint8_t)(dataSize - (fieldChunk * chunkMax)), chunkMax);
+    const uint8_t chunkSize = std::min((uint16_t)(dataSize - (sendChunk * chunkMax)), (uint16_t)chunkMax);
 
     // Move chunkStart back 2 bytes to add (FieldId + ChunksRemain) to each packet
-    chunkStart = &chunkBuffer[fieldChunk * chunkMax];
+    chunkStart = &chunkBuffer[sendChunk * chunkMax];
     chunkStart[0] = parameter->id;                 // FieldId
-    chunkStart[1] = chunkCnt - (fieldChunk + 1); // ChunksRemain
+    chunkStart[1] = chunkCnt - (sendChunk + 1); // ChunksRemain
     memcpy(paramInformation + sizeof(crsf_ext_header_t), chunkStart, chunkSize + 2);
     crsfRouter.SetExtendedHeaderAndCrc((crsf_ext_header_t *)paramInformation, frameType, CRSF_EXT_FRAME_SIZE(chunkSize + 2), origin, device_id);
     crsfRouter.deliverMessageTo(origin, (crsf_header_t *)paramInformation);
-    return chunkCnt - (fieldChunk + 1);
+    return chunkCnt - (sendChunk + 1);
 }
 
 void CRSFEndpoint::pushResponseChunk(commandParameter *cmd)
