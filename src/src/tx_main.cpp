@@ -66,6 +66,11 @@ char backpackVersion[32] = "";
 #define syncSpamAmountAfterRateChange 10
 volatile uint8_t syncSpamCounter = 0;
 volatile uint8_t syncSpamCounterAfterRateChange = 0;
+// Rotates the regular-sync slot. Scaled by FHSShopInterval, so it MUST be reset when the
+// rate changes: a rate with a smaller FHSShopInterval has a smaller NonceFHSSresult range,
+// and a slot left over from a wider rate makes (syncSlot / 2) <= NonceFHSSresult never true,
+// which stops regular sync packets for good and leaves the RX unable to acquire.
+static uint8_t syncSlot = 0;
 uint32_t rfModeLastChangedMS = 0;
 uint32_t SyncPacketLastSent = 0;
 static enum { stbIdle, stbRequested, stbBoosting } syncTelemBoostState = stbIdle;
@@ -493,6 +498,7 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   // InitialFreq has been set, so lets also reset the FHSS Idx and Nonce.
   FHSSsetCurrIndex(0);
   OtaNonce = 0;
+  syncSlot = 0;
 
   OtaUpdateSerializers(newSwitchMode, ModParams->PayloadLength);
   DataUlSender.setMaxPackageIndex(ELRS_MSP_MAX_PACKAGES);
@@ -533,7 +539,6 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   uint32_t const now = millis();
   // ESP requires word aligned buffer
   WORD_ALIGNED_ATTR OTA_Packet_s otaPkt = {0};
-  static uint8_t syncSlot;
 
   const bool isTlmDisarmed = config.GetTlm() == TLM_RATIO_DISARMED;
   uint32_t SyncInterval = (connectionState == connected && !isTlmDisarmed) ? ExpressLRS_currAirRate_RFperfParams->SyncPktIntervalConnected : ExpressLRS_currAirRate_RFperfParams->SyncPktIntervalDisconnected;
