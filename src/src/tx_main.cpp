@@ -434,7 +434,7 @@ uint8_t adjustSwitchModeForAirRate(OtaSwitchMode_e eSwitchMode, uint8_t packetSi
     return eSwitchMode;
 }
 
-void SetRFLinkRate(uint8_t index) // Set speed of RF link
+void SetRFLinkRate(uint8_t index, bool force = false) // Set speed of RF link
 {
   expresslrs_mod_settings_s *const ModParams = get_elrs_airRateConfig(index);
   expresslrs_rf_pref_params_s *const RFperf = get_elrs_RFperfParams(index);
@@ -450,7 +450,8 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   }
 #endif
 
-  if ((ModParams == ExpressLRS_currAirRate_Modparams)
+  if (!force  // an FHSS domain change keeps the same rate, but still has to retune the radio
+    && (ModParams == ExpressLRS_currAirRate_Modparams)
     && (RFperf == ExpressLRS_currAirRate_RFperfParams)
     && (subGHz || invertIQ == Radio.IQinverted)
     && (OtaSwitchModeCurrent == newSwitchMode)
@@ -809,11 +810,11 @@ void ResetPower()
   // TLM interval is set on the next SYNC packet
 }
 
-static void ChangeRadioParams()
+static void ChangeRadioParams(bool forceRadioConfig)
 {
   ModelUpdatePending = false;
   ResetPower(); // Call before SetRFLinkRate(). The LR1121 Radio lib can now set the correct output power in Config().
-  SetRFLinkRate(config.GetRate());
+  SetRFLinkRate(config.GetRate(), forceRadioConfig);
   LbtEnableIfRequired();
 }
 
@@ -841,14 +842,23 @@ static void ConfigChangeCommit()
 {
   // Write the uncommitted eeprom values (may block for a while)
   uint32_t changes = config.Commit();
+  bool fhssDomainChanged = false;
 #if defined(CUSTOM_DOMAIN_ENABLE)
   if (changes & EVENT_CONFIG_MAIN_CHANGED)
   {
+    // EVENT_CONFIG_MAIN_CHANGED is a catch-all, so compare the domain either side of the
+    // rebuild rather than retuning (and dropping the link) on every unrelated config write.
+    const fhss_config_t previousDomain = *FHSSconfig;
     FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+    fhssDomainChanged = FHSSconfig->freq_start != previousDomain.freq_start
+                     || FHSSconfig->freq_stop != previousDomain.freq_stop
+                     || FHSSconfig->freq_count != previousDomain.freq_count;
   }
 #endif
-  // Change params after the blocking finishes as a rate change will change the radio freq
-  ChangeRadioParams();
+  // Change params after the blocking finishes as a rate change will change the radio freq.
+  // A domain change keeps the same rate, so force the reconfigure or SetRFLinkRate() would
+  // early-out and leave the radio tuned to the old domain with a stale OtaNonce.
+  ChangeRadioParams(fhssDomainChanged);
   // Clear the commitInProgress flag so normal processing resumes
   commitInProgress = false;
   devicesTriggerEvent(changes);
@@ -1599,7 +1609,7 @@ void setup()
       DynamicPower_Init();
 
       // Set the pkt rate, TLM ratio, and power from the stored eeprom values
-      ChangeRadioParams();
+      ChangeRadioParams(false);
 
       LbtCcaTimerStart();
       hwTimer::init(nullptr, timerCallback);
