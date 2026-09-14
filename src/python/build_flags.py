@@ -149,6 +149,14 @@ json_flags['wifi-on-interval'] = -1
 
 process_flags("user_defines.txt")
 process_flags("super_defines.txt") # allow secret super_defines to override user_defines
+
+# The firmware reads this as doc["lock-on-first-connection"] | true, so omitting the key
+# leaves locking ON no matter what user_defines.txt says -- removing the define had no
+# effect at all. Emit it explicitly so the absence of the define really means unlocked.
+# A locked receiver never rescans rates (cycleRfMode() early-returns on LockRFmode), so
+# it cannot recover if the transmitter changes rate while it is disconnected.
+if isRX and 'lock-on-first-connection' not in json_flags:
+    json_flags['lock-on-first-connection'] = False
 version_to_env()
 build_flags.append("-DLATEST_COMMIT=" + get_git_sha())
 build_flags.append("-DLATEST_VERSION=" + get_version())
