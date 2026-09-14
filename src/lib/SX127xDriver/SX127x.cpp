@@ -691,6 +691,46 @@ void ICACHE_RAM_ATTR SX127xDriver::IsrCallback_2()
 
 void ICACHE_RAM_ATTR SX127xDriver::IsrCallback(SX12XX_Radio_Number_t radioNumber)
 {
+    if (instance->rxIsrDeferred && instance->currOpmode == SX127x_OPMODE_RXCONTINUOUS)
+    {
+        // In RX mode DIO0 can only mean RxDone. Do not touch the SPI bus here: this
+        // ISR outranks the RF timer ISR and any SPI traffic delays the transmit instant.
+        instance->pendingRxRadios |= radioNumber;
+        return;
+    }
+    instance->HandleIrq(radioNumber);
+}
+
+void ICACHE_RAM_ATTR SX127xDriver::ProcessPendingRx()
+{
+    // Save and restore rather than noInterrupts()/interrupts(): this is called from
+    // inside a critical section on the TX (the deferred decode temporarily rewinds
+    // OtaNonce for the CRC check), and unconditionally re-enabling here would expose
+    // that rewound value to any radio ISR that fired in the gap.
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    uint8_t pending = pendingRxRadios;
+    pendingRxRadios = 0;
+    __set_PRIMASK(primask);
+
+    while (pending)
+    {
+        const SX12XX_Radio_Number_t radioNumber = (pending & SX12XX_Radio_1) ? SX12XX_Radio_1 : SX12XX_Radio_2;
+        pending &= ~radioNumber;
+
+        // The ISR only ever defers RxDone, so go straight to the RX path rather than
+        // re-reading and dispatching the IRQ flags. Going through HandleIrq() would also
+        // observe a TxDone from a transmit already in flight, and its ClearIrqFlags(ALL)
+        // would swallow the interrupt that drives the FHSS hop. Only RxDone is cleared,
+        // for the same reason.
+        processingPacketRadio = radioNumber;
+        RXnbISR(radioNumber);
+        hal.writeRegister(SX127X_REG_IRQ_FLAGS, SX127X_CLEAR_IRQ_FLAG_RX_DONE, radioNumber);
+    }
+}
+
+void ICACHE_RAM_ATTR SX127xDriver::HandleIrq(SX12XX_Radio_Number_t radioNumber)
+{
     instance->processingPacketRadio = radioNumber;
     SX12XX_Radio_Number_t irqClearRadio = radioNumber;
 

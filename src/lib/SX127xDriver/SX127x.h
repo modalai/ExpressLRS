@@ -70,6 +70,13 @@ public:
     void GetLastPacketStats();
     void CheckForSecondPacket();
 
+    // Deferred RX handling: when enabled, the DIO0 ISR does no SPI for RxDone and
+    // only records which radio fired. ProcessPendingRx() must then be called from a
+    // context that is allowed to use the SPI bus (the RF timer callback on the TX)
+    // to pull the packet out of the radio and run RXdoneCallback.
+    void DeferRxIsr(bool enable) { rxIsrDeferred = enable; }
+    void ProcessPendingRx();
+
     ////////////Non-blocking TX related Functions/////////////////
     void TXnb(uint8_t * data, bool sendGeminiBuffer, uint8_t * dataGemini, SX12XX_Radio_Number_t radioNumber);
     /////////////Non-blocking RX related Functions///////////////
@@ -94,6 +101,9 @@ private:
     static void IsrCallback_1();
     static void IsrCallback_2();
     static void IsrCallback(SX12XX_Radio_Number_t radioNumber);
+    void HandleIrq(SX12XX_Radio_Number_t radioNumber);
+    bool rxIsrDeferred = false;
+    volatile uint8_t pendingRxRadios = 0;
     bool RXnbISR(SX12XX_Radio_Number_t radioNumber); // ISR for non-blocking RX routine
     void TXnbISR(); // ISR for non-blocking TX routine
     void CommitOutputPower();

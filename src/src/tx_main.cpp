@@ -1497,6 +1497,16 @@ void setup()
 #endif
 
     Radio.RXdoneCallback = &RXdoneISR;
+#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
+    // Keep the DIO0 ISR off the SPI bus; the packet is read out in ProcessPendingRx()
+    // from timerCallback() instead. The ISR outranks the RF timer ISR, so SPI traffic in
+    // the RxDone path delays the transmit instant, and the 5000us slots cannot absorb it:
+    // undeferred, 200Hz holds 32/90 connected samples and 50Hz DVDA 31/90, while every
+    // slower rate measures identically either way. So defer unconditionally -- it costs
+    // the slower rates nothing and avoids a rate-dependent boundary, which previously
+    // caught 100Hz (exactly 10000us) on the wrong side and dropped it to 8/40.
+    Radio.DeferRxIsr(true);
+#endif
     Radio.TXdoneCallback = &TXdoneISR;
 
     crsfTransmitter.begin();
