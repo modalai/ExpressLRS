@@ -1668,6 +1668,15 @@ void loop()
 
   if (connectionState > MODE_STATES)
   {
+    // A companion computer (voxl-elrs) writes CRSF parameters and then closes
+    // the port, so the UART watchdog drops us to noCrossfire ~1s later. Without
+    // this the pending config would never be flushed to EEPROM and the change
+    // would be lost on the next power cycle. Skip the states where writing
+    // config is unsafe (wifi/serial update, radio/hardware failure).
+    if (connectionState < NO_CONFIG_SAVE_STATES)
+    {
+      CheckConfigChangePending();
+    }
     return;
   }
 
