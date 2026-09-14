@@ -210,7 +210,10 @@ typedef enum
 #define SX127X_MASK_IRQ_FLAG_CAD_DETECTED 0b11111110        //  0     0     valid LoRa signal detected during CAD operation
 
 // SX127X_REG_FIFO_TX_BASE_ADDR
-#define SX127X_FIFO_TX_BASE_ADDR_MAX 0b00000000 //  7     0     allocate the entire FIFO buffer for TX only
+// TX and RX use separate halves of the 256-byte FIFO instead of both basing at 0. With a
+// shared base, TXnb() writes the outgoing packet over a received one that has not been
+// read out yet, which is what forces the telemetry read to happen before the transmit.
+#define SX127X_FIFO_TX_BASE_ADDR_MAX 0b10000000 //  7     0     TX uses the upper half of the FIFO
 
 // SX127X_REG_FIFO_RX_BASE_ADDR
 #define SX127X_FIFO_RX_BASE_ADDR_MAX 0b00000000 //  7     0     allocate the entire FIFO buffer for RX only

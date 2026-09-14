@@ -660,6 +660,34 @@ void ICACHE_RAM_ATTR nonceAdvance()
 /*
  * Called as the TOCK timer ISR when there is a CRSF connection from the handset
  */
+#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
+// Set only while ProcessDeferredTlm() runs. RXdoneISR() ignores RxDone while
+// busyTransmitting, to reject spurious IRQs raised by interference during a transmit --
+// but a deferred packet demonstrably arrived before this transmit started, so that guard
+// must not apply to it.
+static volatile bool decodingDeferredTlm = false;
+
+// Decode a telemetry packet the DIO0 ISR deferred. Reading it before the transmit costs
+// 64-190us of SPI on this dual-radio board and delays the transmit instant by the same
+// amount, which DVDA's 5000us slot cannot absorb. Safe only because TX and RX now use
+// separate halves of the radio FIFO; with both based at 0, TXnb() would have overwritten
+// the received packet. OtaNonce has advanced, so restore the value the packet was sent
+// under for the CRC check, with interrupts masked so TXdoneISR -- which derives the next
+// hop from OtaNonce -- never observes the temporary value.
+static inline void ICACHE_RAM_ATTR ProcessDeferredTlm(uint8_t nonceForPendingTlm)
+{
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  const uint8_t nonceSave = OtaNonce;
+  OtaNonce = nonceForPendingTlm;
+  decodingDeferredTlm = true;
+  Radio.ProcessPendingRx();
+  decodingDeferredTlm = false;
+  OtaNonce = nonceSave;
+  __set_PRIMASK(primask);
+}
+#endif
+
 void ICACHE_RAM_ATTR timerCallback()
 {
   /* If we are busy writing to EEPROM (committing config changes) then we just advance the nonces, i.e. no SPI traffic */
@@ -687,6 +715,13 @@ void ICACHE_RAM_ATTR timerCallback()
     switchDiversityAntennas();
   }
 
+#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
+  // The pending packet was sent under the nonce held right now. Every exit path below
+  // must run the decode: leaving it pending another slot validates it against the wrong
+  // nonce and silently drops the telemetry.
+  const uint8_t nonceForPendingTlm = OtaNonce;
+#endif
+
   // Nonce advances on every timer tick
   if (!InBindingMode)
     OtaNonce++;
@@ -705,7 +740,11 @@ void ICACHE_RAM_ATTR timerCallback()
     LqTQly.inc();
     return;
   }
-  else if (TelemetryRcvPhase == ttrpExpectingTelem && !LqTQly.currentIsSet())
+  else if (TelemetryRcvPhase == ttrpExpectingTelem && !LqTQly.currentIsSet()
+#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
+           && !Radio.HasPendingRx()   // it did arrive, it is just not decoded yet
+#endif
+          )
   {
     // Indicate no telemetry packet received to the DP system
     DynamicPower_TelemetryUpdate(DYNPOWER_UPDATE_MISSED);
@@ -714,6 +753,10 @@ void ICACHE_RAM_ATTR timerCallback()
   TelemetryRcvPhase = ttrpTransmitting;
 
   SendRCdataToRF();
+
+#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
+  ProcessDeferredTlm(nonceForPendingTlm);
+#endif
 }
 
 static void UARTdisconnected()
@@ -839,7 +882,7 @@ static void CheckConfigChangePending()
 bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 {
   // busyTransmitting is required here to prevent accidental rxdone IRQs due to interference triggering RXdoneISR.
-  if (LqTQly.currentIsSet() || busyTransmitting)
+  if (LqTQly.currentIsSet() || (busyTransmitting && !decodingDeferredTlm))
   {
     return false; // Already received tlm, do not run ProcessDownlinkPacket() again.
   }

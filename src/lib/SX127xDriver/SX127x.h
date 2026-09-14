@@ -76,6 +76,8 @@ public:
     // to pull the packet out of the radio and run RXdoneCallback.
     void DeferRxIsr(bool enable) { rxIsrDeferred = enable; }
     void ProcessPendingRx();
+    // True while a deferred RxDone is still waiting to be read out of the radio.
+    bool HasPendingRx() const { return pendingRxRadios != 0; }
 
     ////////////Non-blocking TX related Functions/////////////////
     void TXnb(uint8_t * data, bool sendGeminiBuffer, uint8_t * dataGemini, SX12XX_Radio_Number_t radioNumber);
