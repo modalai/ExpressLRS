@@ -93,6 +93,11 @@ bool RxWiFiReadyToSend = false;
 
 static TxTlmRcvPhase_e TelemetryRcvPhase = ttrpTransmitting;
 StubbornReceiver DataDlReceiver;
+
+// Delivered downlink telemetry, for throughput measurement over SWD. See the increment
+// site in the main loop for why this is counted at frame completion.
+volatile uint32_t tlmBytesRx = 0;
+volatile uint32_t tlmFramesRx = 0;
 StubbornSender DataUlSender;
 uint8_t CRSFinBuffer[CRSF_MAX_PACKET_LEN+1];
 
@@ -1712,6 +1717,14 @@ void loop()
 
   if (DataDlReceiver.HasFinishedData())
   {
+      // Telemetry throughput counters. Every completed downlink CRSF frame is counted
+      // here, which is the quantity that matters and the one link stats cannot show: an
+      // unconditional RxDone deferral once collapsed this to a crawl at 100Hz while both
+      // uplink and downlink LQ still read 100%. Read over SWD and difference over a known
+      // interval to get bytes/sec. Two words and two adds, off the ISR path.
+      tlmBytesRx += CRSFinBuffer[CRSF_TELEMETRY_LENGTH_INDEX] + CRSF_FRAME_NOT_COUNTED_BYTES;
+      tlmFramesRx++;
+
       if (CRSFinBuffer[0] == CRSF_ADDRESS_USB)
       {
         if (config.GetLinkMode() == TX_MAVLINK_MODE)
