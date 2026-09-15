@@ -465,6 +465,21 @@ void SetRFLinkRate(uint8_t index, bool force = false) // Set speed of RF link
 #endif
   hwTimer::updateInterval(interval);
 
+#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
+  // Keep the DIO0 ISR off the SPI bus, but only where the slot cannot absorb the read.
+  // The ISR outranks the RF timer ISR, so SPI traffic in the RxDone path delays the
+  // transmit instant; the 5000us slots cannot absorb that (undeferred, 200Hz holds 32/90
+  // connected samples and 50Hz DVDA 31/90).
+  //
+  // Deferring is NOT free at slower rates, which an earlier unconditional version of this
+  // claimed. It was measured on connected-sample counts, a link-stability metric that
+  // cannot see telemetry throughput. At 100Hz (10000us) deferral starves the telemetry
+  // return path badly enough that loading a receiver's parameters over the LUA script
+  // crawls, while the same build at 200Hz is fine -- bisected against a known-good base.
+  // So defer strictly below 10000us: 200Hz and 50Hz DVDA yes, 100Hz and slower no.
+  Radio.DeferRxIsr(interval < 10000);
+#endif
+
 #if defined(RADIO_LR1121)
   FHSSusePrimaryFreqBand = !RadioBandMod::isB2G4(ModParams->radio_type);
   FHSSuseDualBand = RadioBandMod::isBDUAL(ModParams->radio_type);
@@ -1553,16 +1568,6 @@ void setup()
 #endif
 
     Radio.RXdoneCallback = &RXdoneISR;
-#if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
-    // Keep the DIO0 ISR off the SPI bus; the packet is read out in ProcessPendingRx()
-    // from timerCallback() instead. The ISR outranks the RF timer ISR, so SPI traffic in
-    // the RxDone path delays the transmit instant, and the 5000us slots cannot absorb it:
-    // undeferred, 200Hz holds 32/90 connected samples and 50Hz DVDA 31/90, while every
-    // slower rate measures identically either way. So defer unconditionally -- it costs
-    // the slower rates nothing and avoids a rate-dependent boundary, which previously
-    // caught 100Hz (exactly 10000us) on the wrong side and dropped it to 8/40.
-    Radio.DeferRxIsr(true);
-#endif
     Radio.TXdoneCallback = &TXdoneISR;
 
     crsfTransmitter.begin();
