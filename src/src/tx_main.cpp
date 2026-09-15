@@ -687,6 +687,9 @@ static inline void ICACHE_RAM_ATTR ProcessDeferredTlm(uint8_t nonceForPendingTlm
   OtaNonce = nonceSave;
   __set_PRIMASK(primask);
 }
+#else
+// No deferral on this platform, so RXdoneISR()'s busyTransmitting guard always applies.
+static constexpr bool decodingDeferredTlm = false;
 #endif
 
 void ICACHE_RAM_ATTR timerCallback()
