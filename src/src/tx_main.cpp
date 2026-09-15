@@ -130,6 +130,12 @@ device_affinity_t ui_devices[] = {
 
 static bool diversityAntennaState = LOW;
 
+// Main-loop heartbeat. Read over SWD to tell a wedged main loop from a merely
+// disconnected link without halting the core -- halting resumes it and destroys
+// the evidence. uwTick keeps counting in the SysTick ISR even when loop() is stuck,
+// so it cannot answer this on its own.
+volatile uint32_t txLoopCounter = 0;
+
 static bool inGeminiMode()
 {
     return isDualRadio() && config.GetAntennaMode() == TX_RADIO_MODE_GEMINI;
@@ -1668,6 +1674,8 @@ void setup()
 
 void loop()
 {
+  txLoopCounter++;
+
   uint32_t now = millis();
 
   HandleUARTout(); // Only used for non-CRSF output
