@@ -867,10 +867,26 @@ static void ConfigChangeCommit()
     // EVENT_CONFIG_MAIN_CHANGED is a catch-all, so compare the domain either side of the
     // rebuild rather than retuning (and dropping the link) on every unrelated config write.
     const fhss_config_t previousDomain = *FHSSconfig;
+    // The rebuild is only here to compare domains, but FHSSrandomiseFHSSsequenceBuild()
+    // zeroes FHSSptr as a side effect and OtaNonce is not zeroed with it: SetRFLinkRate()
+    // early-outs on an unchanged rate, and that is the only place the pair is reset
+    // together. timerCallback() goes out of its way to keep them in step through the
+    // EEPROM write -- nonceAdvance() advances both -- so dropping the pointer immediately
+    // afterwards leaves the transmitter on a different hop than the receiver. The sync
+    // packet does carry fhssIndex, but the receiver cannot hear it from another frequency,
+    // so the link drops and has to re-acquire. Measured at 100Hz: a commit cost 36% of a
+    // 12s telemetry window (191 -> 123 B/s) and FHSSptr came back 0-based, while 200Hz
+    // re-acquired fast enough to stay inside the noise. Keep the index when the domain has
+    // not changed; when it has, the forced reconfigure below resets both consistently.
+    const uint8_t previousFhssIdx = FHSSgetCurrIndex();
     FHSSrandomiseFHSSsequence(OtaGetUidSeed());
     fhssDomainChanged = FHSSconfig->freq_start != previousDomain.freq_start
                      || FHSSconfig->freq_stop != previousDomain.freq_stop
                      || FHSSconfig->freq_count != previousDomain.freq_count;
+    if (!fhssDomainChanged)
+    {
+      FHSSsetCurrIndex(previousFhssIdx);
+    }
   }
 #endif
   // Change params after the blocking finishes as a rate change will change the radio freq.
