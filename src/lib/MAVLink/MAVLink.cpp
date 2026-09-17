@@ -5,6 +5,7 @@
 
 #include "ardupilot_custom_telemetry.h"
 #include "ardupilot_protocol.h"
+#include "rxtx_intf.h"
 
 #include <time.h>
 
@@ -101,6 +102,16 @@ void convert_mavlink_to_crsf_telem(crsf_addr_e destination, uint8_t *CRSFinBuffe
         // convert mavlink messages to CRSF messages
         if (have_message)
         {
+            // Forward the whole message to the handset before any filtering:
+            // the Lua bridge relays everything, not just what converts to CRSF.
+            // Re-encoding from the decoded message guarantees the envelope holds
+            // exactly one complete, CRC-valid frame.
+            {
+                static uint8_t mavEnvelopeBuf[MAVLINK_MAX_PACKET_LEN];
+                const uint16_t mavLen = mavlink_msg_to_send_buffer(mavEnvelopeBuf, &msg);
+                MavlinkEnvelopeToHandset(mavEnvelopeBuf, mavLen);
+            }
+
             // Only parse heartbeats from the autopilot (not GCS)
             if (msg.compid != MAV_COMP_ID_AUTOPILOT1)
             {

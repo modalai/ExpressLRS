@@ -32,7 +32,10 @@ void CRSFRouter::processMessage(CRSFConnector *connector, const crsf_header_t *m
 
     const auto extMessage = (crsf_ext_header_t *)message;
     const crsf_frame_type_e packetType = message->type;
-    if (connector && packetType >= CRSF_FRAMETYPE_DEVICE_PING)
+    // The MAVLink envelope sits above the extended-header threshold but carries
+    // a plain header, so reading orig_addr here would take a byte of payload and
+    // register a bogus device.
+    if (connector && packetType >= CRSF_FRAMETYPE_DEVICE_PING && packetType != CRSF_FRAMETYPE_MAVLINK_ENVELOPE)
     {
         connector->addDevice(extMessage->orig_addr);
     }

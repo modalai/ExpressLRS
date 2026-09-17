@@ -19,6 +19,12 @@ void scheduleRebootTime(unsigned long inMs);
  ***/
 #if defined(TARGET_TX)
 void SetSyncSpam();
+// Hands raw MAVLink bytes that arrived from the handset in a CRSF envelope
+// frame to the uplink FIFO, the same one TxUSB input feeds.
+void MavlinkEnvelopeFromHandset(const uint8_t *data, uint8_t count);
+// Wraps one complete, CRC-validated MAVLink message in a CRSF envelope for the
+// handset. Called from the downlink parse in convert_mavlink_to_crsf_telem().
+void MavlinkEnvelopeToHandset(const uint8_t *data, uint16_t count);
 #endif
 
 /***

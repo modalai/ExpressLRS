@@ -87,6 +87,12 @@ typedef enum : uint8_t
     CRSF_FRAMETYPE_MSP_WRITE = 0x7C, // write with 8 byte chunked binary (OpenTX outbound telemetry buffer limit)
     // Ardupilot frames
     CRSF_FRAMETYPE_ARDUPILOT_RESP = 0x80,
+
+    // Raw MAVLink carried over the CRSF handset link. Borrowed from the TBS
+    // envelope frame type so existing tooling recognises it. Unlike every other
+    // type above CRSF_FRAMETYPE_DEVICE_PING this uses a plain header, not an
+    // extended one -- CRSFRouter::processMessage special-cases it accordingly.
+    CRSF_FRAMETYPE_MAVLINK_ENVELOPE = 0xAA,
 } crsf_frame_type_e;
 
 typedef enum : uint8_t {

@@ -36,6 +36,12 @@ bool TXModuleEndpoint::handleRaw(const crsf_header_t *message)
         RcPacketToChannelsData(message);
         return true;    // do NOT forward channel data via CRSF, as we have 'magic' OTA encoding
     }
+    if (message->type == CRSF_FRAMETYPE_MAVLINK_ENVELOPE)
+    {
+        // frame_size counts the type byte and the CRC, so the payload is 2 shorter
+        MavlinkEnvelopeFromHandset(message->payload, message->frame_size - 2);
+        return true;    // consumed: the payload is MAVLink, not a CRSF message to route
+    }
     return false;
 }
 

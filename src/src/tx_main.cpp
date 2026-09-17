@@ -1237,6 +1237,77 @@ static void HandleUARTout()
   }
 }
 
+/**
+ * Wraps a chunk of raw MAVLink in a CRSF envelope frame and sends it to the
+ * handset. EdgeTX does not understand the frame type, so it falls through to
+ * the Lua telemetry queue where a bridge script can pop it and write it to USB.
+ * Chunks arrive from the stubborn receiver already bounded by CRSF_PAYLOAD_SIZE_MAX.
+ */
+// MAVLink downlink instrumentation, read over SWD to bisect where bytes are lost
+// between the RF link and the handset. Not conditional on DEBUG: 16 bytes of RAM
+// and a few adds per chunk, and the numbers are the only way to tell an RF-side
+// loss from a handset-FIFO loss without a port on the TX.
+uint32_t mavDownChunksFromRf = 0;
+uint32_t mavDownBytesFromRf = 0;
+uint32_t mavEnvelopesToHandset = 0;
+uint32_t mavEnvelopeBytesToHandset = 0;
+
+static void sendMavlinkEnvelopeToHandset(const uint8_t *data, uint16_t count)
+{
+  // A frame costs sync + length + type + payload + crc, so the payload a single
+  // envelope can hold is 4 less than the packet limit. Note CRSF_PAYLOAD_SIZE_MAX
+  // is the largest frame_size, not the largest payload, so it is 2 too generous
+  // here. Downlink chunks can reach 62 bytes, hence the split rather than a drop.
+  constexpr uint8_t MAX_ENVELOPE_PAYLOAD = CRSF_MAX_PACKET_LEN - 4;
+  while (count > 0)
+  {
+    const uint8_t chunk = count > MAX_ENVELOPE_PAYLOAD ? MAX_ENVELOPE_PAYLOAD : (uint8_t)count;
+    uint8_t frame[CRSF_MAX_PACKET_LEN];
+    const auto header = (crsf_header_t *)frame;
+    memcpy(header->payload, data, chunk);
+    crsfRouter.SetHeaderAndCrc(header, CRSF_FRAMETYPE_MAVLINK_ENVELOPE, CRSF_FRAME_SIZE(chunk));
+    crsfRouter.deliverMessageTo(CRSF_ADDRESS_RADIO_TRANSMITTER, header);
+    mavEnvelopesToHandset++;
+    mavEnvelopeBytesToHandset += chunk;
+    data += chunk;
+    count -= chunk;
+  }
+}
+
+/**
+ * Emits one complete MAVLink message to the handset as a CRSF envelope.
+ *
+ * Framing is done by the real MAVLink parser in convert_mavlink_to_crsf_telem()
+ * rather than here. An earlier version reassembled the stream itself using only
+ * the length byte, which could not tell a corrupt length from a real one: a
+ * single bad byte made it block waiting for a message that would never arrive,
+ * stalling the downlink for seconds. The parser validates the CRC and resyncs
+ * on its own, so bad frames are simply never emitted.
+ */
+void MavlinkEnvelopeToHandset(const uint8_t *data, const uint16_t count)
+{
+  sendMavlinkEnvelopeToHandset(data, count);
+}
+
+/**
+ * Uplink counterpart: MAVLink the handset's Lua bridge read from USB, arriving
+ * in an envelope frame. It joins the same FIFO that TxUSB input feeds, so the
+ * DataUlSender path downstream is identical no matter which port it came from.
+ */
+void MavlinkEnvelopeFromHandset(const uint8_t *data, const uint8_t count)
+{
+  if (config.GetLinkMode() != TX_MAVLINK_MODE || count == 0)
+  {
+    return;
+  }
+  uartInputBuffer.lock();
+  if (uartInputBuffer.free() >= count)
+  {
+    uartInputBuffer.pushBytes(data, count);
+  }
+  uartInputBuffer.unlock();
+}
+
 static void HandleUARTin()
 {
   if (firmwareOptions.is_airport)
@@ -1408,6 +1479,20 @@ static void setupSerial()
     TxUSB = new HardwareSerial(1);
     ((HardwareSerial *)TxUSB)->begin(firmwareOptions.uart_baud, SERIAL_8N1, U0RXD_GPIO_NUM, U0TXD_GPIO_NUM);
   }
+#elif defined(M0139)
+  // These boards have no USB device and no backpack, so USART2 (the pins named
+  // GPIO_PIN_DEBUG_*) is the only port left for the MAVLink host link. Alias it
+  // to BackpackOrLogStrm rather than opening it twice: that is the same
+  // arrangement the ESP32 targets use when the backpack shares UART0, so the
+  // existing TxUSB == BackpackOrLogStrm checks do the right thing --
+  // TXUSBConnector stops emitting CRSF on the port, the separate backpack read
+  // in HandleUARTin() is skipped so bytes are not consumed twice, and the
+  // downlink is written once by tx_main instead of also by
+  // sendMAVLinkTelemetryToBackpack().
+#if defined(DEBUG_LOG) && !defined(DEBUG_RTT)
+#error "MAVLink shares USART2 with logging on these targets; build with DEBUG_RTT or without DEBUG_LOG"
+#endif
+  TxUSB = BackpackOrLogStrm;
 #else
   TxUSB = new NullStream();
 #endif
@@ -1738,10 +1823,19 @@ void loop()
         if (config.GetLinkMode() == TX_MAVLINK_MODE)
         {
           const uint8_t count = CRSFinBuffer[CRSF_TELEMETRY_LENGTH_INDEX];
+          mavDownChunksFromRf++;
+          mavDownBytesFromRf += count;
           // Convert to CRSF telemetry where we can and send to handset
           convert_mavlink_to_crsf_telem(CRSF_ADDRESS_RADIO_TRANSMITTER, CRSFinBuffer, count);
           // forward raw mavlink data to USB
           TxUSB->write(CRSFinBuffer + CRSF_FRAME_NOT_COUNTED_BYTES, count);
+          // And to the handset, for a Lua bridge to relay to a GCS over USB.
+          // Unconditional rather than behind a config bit: a new config field
+          // would bump TX_CONFIG_VERSION and reset every stored model. EdgeTX
+          // drops the frame when no Lua script has claimed the telemetry queue,
+          // so this costs nothing when the bridge is not running.
+          // (envelopes are emitted from inside convert_mavlink_to_crsf_telem above,
+          // one per complete message, so nothing to do here)
           // And to the backpack if we have one
           if (TxUSB != BackpackOrLogStrm)
           {
