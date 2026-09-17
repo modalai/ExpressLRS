@@ -27,6 +27,7 @@ static constexpr int HANDSET_TELEMETRY_FIFO_SIZE = 128; // this is the smallest 
 /// Out FIFO to buffer messages///
 static constexpr auto CRSF_SERIAL_OUT_FIFO_SIZE = 256U;
 static FIFO<CRSF_SERIAL_OUT_FIFO_SIZE> SerialOutFIFO;
+uint32_t handsetFifoDrops = 0;
 
 Stream *CRSFHandset::PortSecondary;
 
@@ -138,6 +139,12 @@ void CRSFHandset::forwardMessage(const crsf_header_t *message)
         }
 
         SerialOutFIFO.lock();
+        if (!SerialOutFIFO.ensure(size + 1))
+        {
+            // Silent drop: counted so a full handset FIFO is distinguishable
+            // from a loss further up the chain.
+            handsetFifoDrops++;
+        }
         if (SerialOutFIFO.ensure(size + 1))
         {
             auto data = (uint8_t *)message;
