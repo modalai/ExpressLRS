@@ -1944,6 +1944,14 @@ void UpdateUID(const uint8_t *newUid)
     FHSSrandomiseFHSSsequence(OtaGetUidSeed());
     LostConnection(true);
     devicesTriggerEvent(EVENT_CONFIG_UID_CHANGED | EVENT_CONNECTION_CHANGED);
+
+    // An unbound receiver boots into binding mode, which never cycles rates or follows the
+    // hop sequence. A UID written over CRSF (voxl-elrs copying the TX key after an update
+    // reset the config) therefore left it on the bind channel until the next power cycle.
+    if (InBindingMode && OtaUidIsBound(UID))
+    {
+        ExitBindingMode();
+    }
 }
 
 void EnterUnbindMode()
