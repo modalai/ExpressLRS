@@ -1937,6 +1937,16 @@ void EnterBindingModeSafely()
 
 void UpdateUID(const uint8_t *newUid)
 {
+    // Stop the RF timer before writing flash, as CheckConfigChangePending() does. On the
+    // ESP8266 the sector erase holds interrupts off for longer than a timer period, and the
+    // timer schedules each compare from the previous one, so it fell behind the cycle counter
+    // and stopped firing until the counter wrapped (~54 s). LostConnection() below then spun
+    // waiting for a tock until the soft watchdog rebooted the receiver -- on every unbind and
+    // on any UID write while connected. LostConnection() leaves the timer alone in binding
+    // mode, so stop it explicitly as well.
+    LostConnection(false);
+    hwTimer::stop();
+
     memcpy(UID, newUid, UID_LEN);
     config.SetUID(UID);
     config.Commit();
