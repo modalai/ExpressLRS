@@ -2332,6 +2332,13 @@ void reset_into_bootloader(void)
     SERIAL_PROTOCOL_TX.flush();
 #if defined(PLATFORM_ESP8266)
     delay(100);
+    // The download-mode jump turns the flash cache off and clears INTENABLE, but not the
+    // SDK's copy of the enabled-interrupt mask. The ROM's uartAttach() unmasks the UART
+    // through that copy, which re-enables the RF timer and radio interrupts; their IRAM
+    // handlers call hardware_pin() in flash, so the receiver took Exception (0) inside the
+    // ROM loader and rebooted into this firmware instead of waiting for esptool.
+    hwTimer::stop();
+    ets_isr_mask(~0);
     ESP.rebootIntoUartDownloadMode();
 #elif defined(PLATFORM_ESP32)
     delay(100);
