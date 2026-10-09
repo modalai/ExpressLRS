@@ -119,16 +119,19 @@ def condense_flags():
 
 def version_to_env():
     ver = elrs_helpers.get_git_version()
-    if target_name.startswith("MODALAI_"):
-        release_version = os.environ.get("MODALAI_RELEASE_VERSION")
-        if release_version:
-            ver['version'] = release_version
-        else:
-            for flag in build_flags:
-                match = re.fullmatch(r'-DLatest_Version="?([^"\s]+)"?', flag.strip())
-                if match:
-                    ver['version'] = match.group(1)
-                    break
+    # build.sh exports the release version for every target it builds, including the
+    # BETAFPV_900_RX artifact, whose upstream Unified_ESP8285 environment does not carry a
+    # MODALAI_ name. Without this it fell back to the branch name ("v4" from modalai/v4),
+    # which VersionStrToU32() cannot parse, so the receiver reported firmware 0.4.0.0.
+    release_version = os.environ.get("MODALAI_RELEASE_VERSION")
+    if release_version:
+        ver['version'] = release_version
+    elif target_name.startswith("MODALAI_"):
+        for flag in build_flags:
+            match = re.fullmatch(r'-DLatest_Version="?([^"\s]+)"?', flag.strip())
+            if match:
+                ver['version'] = match.group(1)
+                break
     env.Append(GIT_SHA = ver['sha'], GIT_VERSION= ver['version'])
 
 def string_to_ascii(str):
