@@ -211,6 +211,9 @@ if env.get('PIOPLATFORM', '') == 'espressif8266':
         "-Wl,--gc-sections",
         "-Wl,-wrap,system_restart_local",
         "-Wl,-wrap,spi_flash_read",
+        # ESP8266_flash_guard.cpp: keep the RF interrupts out of flash erase/write
+        "-Wl,-wrap,spi_flash_erase_sector",
+        "-Wl,-wrap,spi_flash_write",
         "-u", "app_entry",
         #"-u", "_printf_float",
         #"-u", "_scanf_float",
