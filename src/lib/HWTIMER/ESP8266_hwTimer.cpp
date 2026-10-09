@@ -17,6 +17,23 @@ static uint32_t NextTimeout;
 #define HWTIMER_TICKS_PER_US 5
 #define HWTIMER_PRESCALER (clockCyclesPerMicrosecond() / HWTIMER_TICKS_PER_US)
 
+// Arm CCOMPARE0 for NextTimeout. Each deadline is advanced from the previous one rather than
+// from "now" so the phase never drifts, which means an interrupt serviced more than one step
+// late -- ESP8266_flash_guard.cpp holds it off for tens of milliseconds while flash is erased
+// or written -- leaves the new deadline already behind CCOUNT. CCOMPARE0 then does not match
+// again until the 32-bit cycle counter wraps (~27 s at 160 MHz): the timer silently stops, and
+// on the RX LostConnection() waited for it until the soft watchdog rebooted the receiver. Skip
+// whole periods until the deadline is ahead again, keeping both the phase and tick/tock order.
+static inline void ICACHE_RAM_ATTR armNextTimeout(uint32_t period)
+{
+    constexpr int32_t minLeadCycles = 2 * HWTIMER_TICKS_PER_US * HWTIMER_PRESCALER; // 2 us
+    while ((int32_t)(NextTimeout - ESP.getCycleCount()) < minLeadCycles)
+    {
+        NextTimeout += period;
+    }
+    timer0_write(NextTimeout);
+}
+
 void hwTimer::init(void (*callbackTick)(), void (*callbackTock)())
 {
     hwTimer::callbackTick = callbackTick;
@@ -79,19 +96,19 @@ void ICACHE_RAM_ATTR hwTimer::callback()
     {
 #if defined(TARGET_TX)
         NextTimeout += HWtimerInterval;
-        timer0_write(NextTimeout);
+        armNextTimeout(HWtimerInterval);
         callbackTock();
 #else
         NextTimeout += (HWtimerInterval >> 1) + (FreqOffset * HWTIMER_PRESCALER);
         if (hwTimer::isTick)
         {
-            timer0_write(NextTimeout);
+            armNextTimeout(HWtimerInterval);
             callbackTick();
         }
         else
         {
             NextTimeout += PhaseShift;
-            timer0_write(NextTimeout);
+            armNextTimeout(HWtimerInterval);
             PhaseShift = 0;
             callbackTock();
         }
