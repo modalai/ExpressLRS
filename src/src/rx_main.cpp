@@ -225,6 +225,17 @@ bool BindingModeRequest = false;
 
 extern void setWifiUpdateMode();
 void reconfigureSerial();
+// The serial driver actually instantiated when it is MAVLink. The config's protocol changes
+// in ProcessRfPacket_SYNC() as soon as the TX announces MAVLink link mode, but the driver is
+// only swapped 100 ms later by the deferred reconfigureSerial(); casting serialIO on the
+// strength of the config calls SerialMavlink methods on a SerialCRSF object in that window
+// and reads past it (HardFault on the M0184).
+static SerialMavlink *serialMavlink = nullptr;
+// One shared sink. Every serial reconfigure used to `new` a fresh NullStream (twice: in
+// serialShutdown() and again in setupSerial()) and never free the old one; on the M0184's
+// 20 KB heap ~20 MAVLink<->CRSF switches left too little room for `new SerialMavlink`,
+// which then returned null and the constructor faulted writing through it.
+static NullStream nullStream;
 
 uint8_t getLq()
 {
@@ -1313,9 +1324,9 @@ void DataUlReceiveComplete()
         break;
     case MSP_ELRS_MAVLINK_TLM: // 0xFD
         // raw mavlink data
-        if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
+        if (serialMavlink != nullptr)
         {
-            ((SerialMavlink *)serialIO)->forwardMessage(DataUlBuffer);
+            serialMavlink->forwardMessage(DataUlBuffer);
         }
         break;
     default:
@@ -1348,7 +1359,7 @@ static void setupSerial()
         BackpackOrLogStrm = &Serial;
         #endif
         #else
-        BackpackOrLogStrm = new NullStream();
+        BackpackOrLogStrm = &nullStream;
         #endif
         serialIO = new SerialNOOP();
         return;
@@ -1454,7 +1465,8 @@ static void setupSerial()
     }
     else if (mavlinkSerialOutput)
     {
-        serialIO = new SerialMavlink(SERIAL_PROTOCOL_TX, SERIAL_PROTOCOL_RX);
+        serialMavlink = new SerialMavlink(SERIAL_PROTOCOL_TX, SERIAL_PROTOCOL_RX);
+        serialIO = serialMavlink;
     }
     else if (config.GetSerialProtocol() == PROTOCOL_MSP_DISPLAYPORT)
     {
@@ -1487,7 +1499,7 @@ static void setupSerial()
     BackpackOrLogStrm = &Serial;
 #endif
 #else
-    BackpackOrLogStrm = new NullStream();
+    BackpackOrLogStrm = &nullStream;
 #endif
 }
 
@@ -1589,12 +1601,18 @@ void reconfigureSerial1()
 
 static void serialShutdown()
 {
-    BackpackOrLogStrm = new NullStream();
-    if(serialIO != nullptr)
+    BackpackOrLogStrm = &nullStream;
+    // Detach the driver before freeing it. sendImmediateRC() runs in the RF timer ISR
+    // (HWtimerCallbackTock) and calls into *serialIO; clearing the pointer only after the
+    // delete leaves a window where that ISR could use the freed object. (Hardening: not the
+    // cause of either crash seen on the bench.)
+    SerialIO *old = serialIO;
+    serialIO = nullptr;
+    serialMavlink = nullptr;
+    if (old != nullptr)
     {
         Serial.end();
-        delete serialIO;
-        serialIO = nullptr;
+        delete old;
     }
 }
 
@@ -2104,7 +2122,7 @@ void setup()
     {
         // In the failure case we set the logging to the null logger so nothing crashes
         // if it decides to log something
-        BackpackOrLogStrm = new NullStream();
+        BackpackOrLogStrm = &nullStream;
 
         // Register the WiFi with the framework
         static device_affinity_t wifi_device[] = {
@@ -2134,7 +2152,7 @@ void setup()
         Serial.begin(serialBaud);
         BackpackOrLogStrm = &Serial;
         #else
-        BackpackOrLogStrm = new NullStream();
+        BackpackOrLogStrm = &nullStream;
         #endif
 
         // External EEPROM targets need their fixed I2C pins before the config load.
@@ -2274,7 +2292,7 @@ void loop()
         DataDlSender.SetDataToTransmit(DataDlBuffer, nextPlayloadSize);
     }
 
-    if (config.GetSerialProtocol() == PROTOCOL_MAVLINK && !DataDlSender.IsActive() && ((SerialMavlink *)serialIO)->GetNextPayload(&nextPlayloadSize, DataDlBuffer))
+    if (serialMavlink != nullptr && !DataDlSender.IsActive() && serialMavlink->GetNextPayload(&nextPlayloadSize, DataDlBuffer))
     {
         DataDlSender.SetDataToTransmit(DataDlBuffer, nextPlayloadSize);
     }
