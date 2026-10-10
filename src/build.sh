@@ -146,8 +146,10 @@ if [ "$BUILD_FACTORY" -eq 1 ]; then
         dd if=/dev/zero bs=1 count="$padding_size" status=none | tr '\000' '\377'
         command cat "$SOURCE_BIN"
     } > "$factory_bin"
-    pio pkg exec -p toolchain-gccarmnoneeabi -c \
-        "arm-none-eabi-objcopy -I binary -O srec --change-addresses=0x08000000 ${factory_bin} ${factory_srec}"
+    # Pass the command as arguments rather than with -c: PlatformIO 6.1.x (the voxl-elrs CI
+    # image) reads args[0] unconditionally in 'pkg exec' and raises IndexError for -c alone.
+    pio pkg exec -p toolchain-gccarmnoneeabi -- \
+        arm-none-eabi-objcopy -I binary -O srec --change-addresses=0x08000000 "$factory_bin" "$factory_srec"
     rm -f "$factory_bin"
     md5sum "$factory_srec"
 fi
