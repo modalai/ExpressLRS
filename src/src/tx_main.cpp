@@ -576,7 +576,10 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
   uint8_t NonceFHSSresult = OtaNonce % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
 
   // Sync spam only happens on slot 1 and 2 and can't be disabled
-  if ((syncSpamCounter || (syncSpamCounterAfterRateChange && FHSSonSyncChannel())) && (NonceFHSSresult == 1 || NonceFHSSresult == 2))
+  // The after-change spam is for the new rate: while the change is still pending (the guard in
+  // CheckConfigChangePending()) it would be spent at the old rate, and cleared outright while
+  // the old link still counts as connected.
+  if ((syncSpamCounter || (syncSpamCounterAfterRateChange && FHSSonSyncChannel() && !config.IsModified())) && (NonceFHSSresult == 1 || NonceFHSSresult == 2))
   {
     otaPkt.std.type = PACKET_TYPE_SYNC;
     GenerateSyncPacketData(OtaIsFullRes ? &otaPkt.full.sync.sync : &otaPkt.std.sync);
@@ -915,6 +918,14 @@ static void CheckConfigChangePending()
   {
     // Keep transmitting sync packets until the spam counter runs out
     if (syncSpamCounter > 0)
+      return;
+
+    // A receiver that heard the announcement switches straight away and writes the new rate
+    // to flash (~40 ms on the M0184, radio idle). The first sync packets at the new rate are
+    // the only ones until the sync channel comes round again -- one per visit, every 3.2 s,
+    // at 25Hz -- so switching right after the last announcement could send them while it is
+    // still writing. Give it that time.
+    if (millis() - SyncPacketLastSent < 60)
       return;
 
     // wait until no longer transmitting
