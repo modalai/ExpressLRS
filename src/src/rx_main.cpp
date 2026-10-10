@@ -2268,6 +2268,11 @@ void loop()
     if ((connectionState != disconnected) && (ExpressLRS_currAirRate_Modparams->index != ExpressLRS_nextAirRateIndex)) // forced change
     {
         DBGLN("Req air rate change %u->%u", ExpressLRS_currAirRate_Modparams->index, ExpressLRS_nextAirRateIndex);
+        // Save the new rate as the initial rate now, while the link is down anyway. Left to
+        // TentativeConnection(), the commit would come on the first tentative connection at the
+        // new rate, and CheckConfigChangePending() drops that connection to write the config, so
+        // the receiver has to wait for the next sync packet to start over.
+        config.SetRateInitialIdx(ExpressLRS_nextAirRateIndex);
         LostConnection(true);
         LastSyncPacket = now;           // reset this variable to stop rf mode switching and add extra time
         RFmodeLastCycled = now;         // reset this variable to stop rf mode switching and add extra time
