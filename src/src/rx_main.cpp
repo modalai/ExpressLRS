@@ -1735,7 +1735,9 @@ static void cycleRfMode(unsigned long now)
         return;
 
     // Actually cycle the RF mode if not LOCK_ON_FIRST_CONNECTION
-    if (LockRFmode == false && (now - RFmodeLastCycled) > (cycleInterval * RFmodeCycleMultiplier))
+    // TentativeConnection() sets RFmodeLastCycled from the RX ISR, so it can be newer than
+    // the 'now' loop() took at the top of this pass: compare signed, as for LastValidPacket.
+    if (LockRFmode == false && (int32_t)(now - RFmodeLastCycled) > (int32_t)(cycleInterval * RFmodeCycleMultiplier))
     {
         RFmodeLastCycled = now;
         LastSyncPacket = now;           // reset this variable
@@ -2280,7 +2282,12 @@ void loop()
         SendLinkStatstoFCForcedSends = 2;
     }
 
-    if (connectionState == tentative && (now - LastSyncPacket > ExpressLRS_currAirRate_RFperfParams->RxLockTimeoutMs))
+    // LastSyncPacket is set by the RX ISR and can be newer than 'now' (taken at the top of
+    // this pass). Unsigned, that difference wrapped to ~4e9 and aborted a tentative connection
+    // made a moment earlier as "Bad sync" -- the first sync after a rate change usually arrives
+    // while loop() is busy, so that cost a full hop cycle or more to re-acquire.
+    uint32_t localLastSyncPacket = LastSyncPacket;
+    if (connectionState == tentative && (int32_t)(now - localLastSyncPacket) > (int32_t)ExpressLRS_currAirRate_RFperfParams->RxLockTimeoutMs)
     {
         DBGLN("Bad sync, aborting");
         LostConnection(true);
