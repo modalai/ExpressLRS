@@ -326,6 +326,14 @@ void CRSFHandset::handleInput()
     {
         DBGLN("UART CRC failure");
         BadPktsCount++;
+        // A bad CRC usually means this was not a frame start at all: a sync byte value inside
+        // another frame's payload, or a frame cut short. Dropping the whole claimed length can
+        // swallow the next real frame's header, and with the handset's frames arriving in
+        // bursts the parser then stays misaligned frame after frame (seen ~1.6 s after a
+        // 200Hz -> 25Hz switch) until the UART watchdog resets the port. Rescan from the next
+        // byte instead.
+        alignBufferToSync(1);
+        return;
     }
 
     SerialInPacketPtr -= totalLen;

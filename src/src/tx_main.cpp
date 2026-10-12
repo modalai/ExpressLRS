@@ -72,6 +72,9 @@ volatile uint8_t syncSpamCounterAfterRateChange = 0;
 // which stops regular sync packets for good and leaves the RX unable to acquire.
 static uint8_t syncSlot = 0;
 uint32_t rfModeLastChangedMS = 0;
+// Set once the handset has sent a ModelID since boot. EdgeTX sends it when the model loads
+// and does not repeat it after a CRSF dropout.
+static bool modelIdReceived = false;
 uint32_t SyncPacketLastSent = 0;
 static enum { stbIdle, stbRequested, stbBoosting } syncTelemBoostState = stbIdle;
 ////////////////////////////////////////////////
@@ -811,8 +814,11 @@ static void UARTconnected()
   {
     // When CRSF first connects, always go into a brief delay before
     // starting to transmit, to make sure a ModelID update isn't coming
-    // right behind it
-    setConnectionState(awaitingModelId);
+    // right behind it. A handset that comes back after a dropout already sent
+    // its ModelID and will not repeat it, so waiting would only keep the link
+    // silent until DisconnectTimeoutMs (6 s at 25Hz) -- long enough for every
+    // receiver to lose the link and to miss a rate announcement sent meanwhile.
+    setConnectionState(modelIdReceived ? disconnected : awaitingModelId);
   }
   // But start the timer to get OpenTX sync going and a ModelID update sent
   hwTimer::resume();
@@ -852,6 +858,7 @@ static void ChangeRadioParams(bool forceRadioConfig)
 
 void ModelUpdateReq()
 {
+  modelIdReceived = true;
   // Force synspam with the current rate parameters in case already have a connection established
   if (config.SetModelId(crsfTransmitter.modelId))
   {
