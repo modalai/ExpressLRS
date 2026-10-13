@@ -1815,6 +1815,16 @@ RxConfig::SetDefaults(bool commit)
         SetPwmChannel(ch, 512, ch, false, mode, false);
     }
     SetPwmChannel(2, 0, 2, false, 0, false); // ch2 is throttle, failsafe it to 988
+#if defined(M0139)
+    // ModalAI receivers drive LEDs and payload GPIO from these pins, not a throttle,
+    // so every pin sends no pulses (held low) until it is configured. A failsafe of 0
+    // is the lowest pulse (800us) for when a pin is switched to Set Position.
+    for (int ch=0; ch<PWM_MAX_CHANNELS; ++ch)
+    {
+        m_config.pwmChannels[ch].val.failsafe = 0;
+        m_config.pwmChannels[ch].val.failsafeMode = PWMFAILSAFE_NO_PULSES;
+    }
+#endif
 #endif
 
     m_config.teamraceChannel = AUX7; // CH11
@@ -1850,7 +1860,7 @@ RxConfig::SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inv
         return;
 
     rx_config_pwm_t *pwm = &m_config.pwmChannels[ch];
-    rx_config_pwm_t newConfig;
+    rx_config_pwm_t newConfig{};
     newConfig.val.failsafe = failsafe;
     newConfig.val.inputChannel = inputCh;
     newConfig.val.inverted = inverted;
