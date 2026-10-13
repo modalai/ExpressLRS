@@ -1366,6 +1366,13 @@ void RxConfig::Load()
         return;
     }
 
+#if defined(M0139)
+    // ModalAI receivers start from defaults after any config version change
+    SetDefaults(true);
+    CheckUpdateFlashedUid(true);
+    return;
+#endif
+
     // V11→V12: teamrace fields moved before pwmChannels to fit within 128-byte EEPROM.
     // Preserve uid and other header fields, reset everything else to defaults.
     if (version == 11)

@@ -17,7 +17,16 @@
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
 #define TX_CONFIG_VERSION   9U
+#if defined(M0139)
+// ModalAI receivers reset to defaults whenever the stored version differs (see
+// RxConfig::Load()). The 3.5.3.x and 4.x lines share these numbers with the
+// same magic but different layouts, so a bump on either line takes the next
+// number neither has used (3.5.3.31: 14, 4.1.0.8: 15).
+// v16: PWM pins default to No Pulses (held low).
+#define RX_CONFIG_VERSION   16U
+#else
 #define RX_CONFIG_VERSION   14U
+#endif
 
 #if defined(TARGET_TX)
 
