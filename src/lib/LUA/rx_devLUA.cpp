@@ -259,7 +259,7 @@ static struct luaItem_folder luaPinFolder3 = {{STR_PIN_4, CRSF_FOLDER}};
 #define PWM_FAILSAFE_VAL_PARAM(n) \
     static struct luaItem_int16 luaPwmFailsafeVal##n = { \
         {STR_FAILSAFE_VAL, CRSF_UINT16}, \
-        {{(uint16_t)1500, (uint16_t)988, (uint16_t)2100}}, \
+        {{(uint16_t)1500, (uint16_t)800, (uint16_t)2200}}, \
         "us" \
     }
 
