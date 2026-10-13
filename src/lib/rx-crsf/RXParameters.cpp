@@ -198,7 +198,7 @@ static selectionParameter luaPwmRequiresArm[4] = {
 #undef PWM_SELECTION_PARAMETER
 
 #define PWM_FAILSAFE_PARAMETER \
-    {{"Failsafe (us)", CRSF_UINT16}, {{htobe16(1500), htobe16(988), htobe16(2100)}}, "us"}
+    {{"Failsafe (us)", CRSF_UINT16}, {{htobe16(1500), htobe16(800), htobe16(2200)}}, "us"}
 static int16Parameter luaPwmFailsafeValue[4] = {
     PWM_FAILSAFE_PARAMETER, PWM_FAILSAFE_PARAMETER, PWM_FAILSAFE_PARAMETER, PWM_FAILSAFE_PARAMETER
 };
