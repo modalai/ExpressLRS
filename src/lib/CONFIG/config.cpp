@@ -1631,9 +1631,18 @@ RxConfig::SetDefaults(bool commit)
             }
 #endif
         }
+#if defined(M0139)
+        // ModalAI receivers drive LEDs and payload GPIO from these pins, not a throttle,
+        // so every pin sends no pulses (held low) until it is configured. A failsafe of 0
+        // is the lowest pulse (MODAL_PWM_FAILSAFE_BASE_US, 800us) for when a pin is
+        // switched to Set Position.
+        SetPwmChannel(ch, 0, ch, false, mode, false);
+        m_config.pwmChannels[ch].val.failsafeMode = PWMFAILSAFE_NO_PULSES;
+#else
         const uint16_t failsafe = ch == 2 ? US_CHANNEL_VALUE_EXT_MIN - US_CHANNEL_VALUE_MIN :
                                             US_CHANNEL_VALUE_CENTER - US_CHANNEL_VALUE_MIN; // ch2 is throttle, failsafe it to 880
         SetPwmChannel(ch, failsafe, ch, false, mode, false);
+#endif
     }
 
     m_config.teamraceChannel = AUX7; // CH11
