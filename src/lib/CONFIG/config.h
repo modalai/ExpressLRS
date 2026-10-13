@@ -26,7 +26,12 @@
 // accepted by Load() and reinterpreted one bit off (tlm read as 1:2 instead of
 // STD, wrong power/switchMode). Bumped to force SetDefaults() on those units.
 #define TX_CONFIG_VERSION   11U
-#define RX_CONFIG_VERSION   15U
+// RX versions are shared with the 3.5.3.x line (same magic, different layout),
+// so a bump on either line takes the next number neither has used, or a
+// cross-major flash would accept the other line's config. 3.5.3.32 is v16.
+// RX v17: PWM pins default to No Pulses (held low), bumped so updated receivers
+// reset to those defaults.
+#define RX_CONFIG_VERSION   17U
 #else
 #define TX_CONFIG_VERSION   8U
 #define RX_CONFIG_VERSION   11U
