@@ -317,6 +317,7 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
             modelMatchId = package[5];
             return true;
         }
+#if defined(TARGET_RX)
         if (header->type == CRSF_FRAMETYPE_COMMAND && package[3] == PWMCmd::SET_PWM_CH)
         {
             callUpdatePWM = true;
@@ -331,6 +332,7 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
             pwmValueOverride = *((pwm_val_override_t *) &header->payload[0]);
             return true;
         }
+#endif
     }
 
     if (header->type == CRSF_FRAMETYPE_DEVICE_PING && header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER)
