@@ -234,8 +234,7 @@
 #endif
 
 // Using these DEBUG_* imply that no SerialIO will be used so the output is readable
-#if !defined(DEBUG_CRSF_NO_OUTPUT) && defined(TARGET_RX) && (defined(DEBUG_RCVR_LINKSTATS) || (defined(DEBUG_RX_SCOREBOARD) && !defined(M0138)) || defined(DEBUG_RCVR_SIGNAL_STATS)) && !defined(DEBUG_ACTIVE)
-#error NO CRSF
+#if !defined(DEBUG_CRSF_NO_OUTPUT) && defined(TARGET_RX) && (defined(DEBUG_RCVR_LINKSTATS) || defined(DEBUG_RX_SCOREBOARD) || defined(DEBUG_RCVR_SIGNAL_STATS))
 #define DEBUG_CRSF_NO_OUTPUT
 #endif
 
