@@ -149,22 +149,22 @@ void PWMController::setDuty(pwm_channel_t channel, uint16_t duty)
     uint16_t mappedValue = 0;
     switch(pin){
         case Ch1:
-            mappedValue = map(duty, 0, 100, 0, htim3.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim3));
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, mappedValue);
             break;
         
         case Ch2:
-            mappedValue = map(duty, 0, 100, 0, htim3.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim3));
             __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, mappedValue);
             break;
 
         case Ch3:
-            mappedValue = map(duty, 0, 100, 0, htim1.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim1));
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, mappedValue);
             break;
 
         case Ch4:
-            mappedValue = map(duty, 0, 100, 0, htim1.Init.Period);
+            mappedValue = map(duty, 0, 1000, 0, __HAL_TIM_GET_AUTORELOAD(&htim1));
             __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, mappedValue);
             break;
 
