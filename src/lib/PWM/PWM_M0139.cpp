@@ -39,6 +39,16 @@ static void PWM_Error_Handler()
 //   }
 }
 
+// Hand a pin back to its timer; On/Off mode turns it into a GPIO output
+static void timerPinInit(GPIO_TypeDef *port, uint16_t gpioPin)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = gpioPin;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(port, &GPIO_InitStruct);
+}
+
 pwm_channel_t PWMController::allocate(uint8_t pin, uint32_t frequency)
 {
     for(int channel=0 ; channel<MAX_PWM_CHANNELS ; channel++)
@@ -52,24 +62,28 @@ pwm_channel_t PWMController::allocate(uint8_t pin, uint32_t frequency)
                     DBGLN("Starting PWM on: %u", pin);
                     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
                     __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_3, 0);  // ALL LEDs OFF
+                    timerPinInit(GPIOB, GPIO_PIN_0);
                     break;
                 
                 case Ch2:
                     DBGLN("Starting PWM on: %u", pin);
                     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
                     __HAL_TIM_SetCompare(&htim3, TIM_CHANNEL_4, 0);  // ALL LEDs OFF
+                    timerPinInit(GPIOB, GPIO_PIN_1);
                     break;
 
                 case Ch3:
                     DBGLN("Starting PWM on: %u", pin);
                     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
                     __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, 0);  // ALL LEDs OFF
+                    timerPinInit(GPIOA, GPIO_PIN_8);
                     break;
                 
                 case Ch4:
                     DBGLN("Starting PWM on: %u", pin);
                     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
                     __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_4, 0);  // ALL LEDs OFF
+                    timerPinInit(GPIOA, GPIO_PIN_11);
                     break;
 
                 default:
