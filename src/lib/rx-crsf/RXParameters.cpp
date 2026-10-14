@@ -735,11 +735,7 @@ static char pwmModes[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHzDuty;On/Off;DSh
 static selectionParameter luaSerialProtocol = {
     {"Protocol", CRSF_TEXT_SELECTION},
     0, // value
-#if defined(M0139)
-    "CRSF;Inverted CRSF;SBUS;Inverted SBUS;SUMD;DJI RS Pro;HoTT Telemetry;MAVLink;DisplayPort;GPS;IBus",
-#else
     "CRSF;Inverted CRSF;SBUS;Inverted SBUS;SUMD;DJI RS Pro;HoTT Telemetry;MAVLink;DisplayPort;GPS",
-#endif
     STR_EMPTYSPACE
 };
 
@@ -988,94 +984,6 @@ static commandParameter luaSetFailsafe = {
     STR_EMPTYSPACE
 };
 
-#if defined(M0139)
-static selectionParameter luaPwmArmed = {
-    {"PWM Armed", CRSF_TEXT_SELECTION},
-    0,
-    "Disarmed;Armed",
-    STR_EMPTYSPACE
-};
-
-static selectionParameter luaMappingNarrow = {
-    {"Narrow Pulse", CRSF_TEXT_SELECTION},
-    0,
-    "Off;On",
-    STR_EMPTYSPACE
-};
-
-static selectionParameter luaMappingFailsafeMode = {
-    {"Failsafe Mode", CRSF_TEXT_SELECTION},
-    0,
-    "Set Position;No Pulses;Last Position",
-    STR_EMPTYSPACE
-};
-
-static int16Parameter luaMappingFailsafeValue = {
-    {"Failsafe", CRSF_UINT16},
-    {{htobe16(1500), htobe16(US_CHANNEL_VALUE_MIN), htobe16(US_CHANNEL_VALUE_MAX)}},
-    "us"
-};
-
-static selectionParameter luaMappingMapMode = {
-    {"Map Mode", CRSF_TEXT_SELECTION},
-    0,
-    "Off;Step;Interpolate",
-    STR_EMPTYSPACE
-};
-
-#define PWM_MAP_PARAMETER(variable, label, maximum, unitsLabel) \
-    static int16Parameter variable = { \
-        {label, CRSF_UINT16}, \
-        {{0, 0, htobe16(maximum)}}, \
-        unitsLabel \
-    }
-
-PWM_MAP_PARAMETER(luaMappingInput1, "Map Input 1", 2046, "CRSF");
-PWM_MAP_PARAMETER(luaMappingInput2, "Map Input 2", 2046, "CRSF");
-PWM_MAP_PARAMETER(luaMappingInput3, "Map Input 3", 2046, "CRSF");
-PWM_MAP_PARAMETER(luaMappingOutput1, "Map Output 1", 4094, "us");
-PWM_MAP_PARAMETER(luaMappingOutput2, "Map Output 2", 4094, "us");
-PWM_MAP_PARAMETER(luaMappingOutput3, "Map Output 3", 4094, "us");
-#undef PWM_MAP_PARAMETER
-
-static selectionParameter luaMappingRequiresArm = {
-    {"Requires Arm", CRSF_TEXT_SELECTION},
-    0,
-    "Off;On",
-    STR_EMPTYSPACE
-};
-
-static folderParameter luaUidFolder = {
-    {"Receiver UID", CRSF_FOLDER},
-};
-
-#define UID_PARAMETER(index) \
-    static int8Parameter luaUid##index = { \
-        {"Byte " #index, CRSF_UINT8}, \
-        {{0, 0, 255}}, \
-        STR_EMPTYSPACE \
-    }
-
-UID_PARAMETER(0);
-UID_PARAMETER(1);
-UID_PARAMETER(2);
-UID_PARAMETER(3);
-UID_PARAMETER(4);
-UID_PARAMETER(5);
-#undef UID_PARAMETER
-
-static commandParameter luaApplyUid = {
-    {"Apply UID", CRSF_COMMAND},
-    lcsIdle,
-    STR_EMPTYSPACE
-};
-
-static uint8_t pendingUid[UID_LEN];
-static bool pendingUidDirty;
-#endif
-
-// Unbind is offered on every receiver, so it lives outside the UID folder block
-// above, which is M0139-only.
 static commandParameter luaUnbind = {
     {"Unbind", CRSF_COMMAND},
     lcsIdle,
@@ -1132,63 +1040,6 @@ static uint8_t sanitizePwmMode(uint8_t mode)
 {
     return OPT_PWM_OUT_ONLY && mode >= somSerial ? som50Hz : mode;
 }
-
-#if defined(M0139)
-static uint8_t selectedPwmOutput()
-{
-  return constrain(luaMappingChannelOut.properties.u.value, 1, GPIO_PIN_PWM_OUTPUTS_COUNT) - 1;
-}
-
-static rx_config_pwm_t getSelectedPwmConfig()
-{
-  return *config.GetPwmChannel(selectedPwmOutput());
-}
-
-static void saveSelectedPwmConfig(const rx_config_pwm_t &channel)
-{
-  config.SetPwmChannelRaw(selectedPwmOutput(), channel.raw);
-}
-
-static void setSelectedMapValue(propertiesCommon *item, int32_t arg)
-{
-  rx_config_pwm_t channel = getSelectedPwmConfig();
-  const uint16_t storedValue = arg >> 1;
-  if (item == &luaMappingInput1.common) channel.val.mapInVal1 = storedValue;
-  else if (item == &luaMappingInput2.common) channel.val.mapInVal2 = storedValue;
-  else if (item == &luaMappingInput3.common) channel.val.mapInVal3 = storedValue;
-  else if (item == &luaMappingOutput1.common) channel.val.mapOutVal1 = storedValue;
-  else if (item == &luaMappingOutput2.common) channel.val.mapOutVal2 = storedValue;
-  else if (item == &luaMappingOutput3.common) channel.val.mapOutVal3 = storedValue;
-  saveSelectedPwmConfig(channel);
-}
-
-static void setPendingUidByte(propertiesCommon *item, int32_t arg)
-{
-  const uint8_t index = item == &luaUid0.common ? 0 :
-                        item == &luaUid1.common ? 1 :
-                        item == &luaUid2.common ? 2 :
-                        item == &luaUid3.common ? 3 :
-                        item == &luaUid4.common ? 4 : 5;
-  pendingUid[index] = arg;
-  pendingUidDirty = true;
-}
-
-static void updateModalPwmParameters(const rx_config_pwm_t *channel)
-{
-  luaMappingNarrow.value = channel->val.narrow;
-  luaMappingFailsafeMode.value = channel->val.failsafeMode;
-  luaMappingFailsafeValue.properties.u.value = htobe16(channel->val.failsafe + US_CHANNEL_VALUE_MIN);
-  luaMappingMapMode.value = channel->val.mapMode;
-  luaMappingInput1.properties.u.value = htobe16(channel->val.mapInVal1 << 1);
-  luaMappingInput2.properties.u.value = htobe16(channel->val.mapInVal2 << 1);
-  luaMappingInput3.properties.u.value = htobe16(channel->val.mapInVal3 << 1);
-  luaMappingOutput1.properties.u.value = htobe16(channel->val.mapOutVal1 << 1);
-  luaMappingOutput2.properties.u.value = htobe16(channel->val.mapOutVal2 << 1);
-  luaMappingOutput3.properties.u.value = htobe16(channel->val.mapOutVal3 << 1);
-  luaMappingRequiresArm.value = channel->val.requiresArm;
-  luaPwmArmed.value = servoIsArmed();
-}
-#endif
 
 void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
 {
@@ -1379,9 +1230,6 @@ void RXEndpoint::luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg)
     setUint8Value(&luaMappingChannelIn, pwmCh->val.inputChannel + 1);
     setTextSelectionValue(&luaMappingOutputMode, sanitizePwmMode(pwmCh->val.mode));
     setTextSelectionValue(&luaMappingInverted, pwmCh->val.inverted);
-#if defined(M0139)
-    updateModalPwmParameters(pwmCh);
-#endif
 }
 
 static void luaparamMappingChannelIn(propertiesCommon *item, uint8_t arg)
@@ -1583,11 +1431,6 @@ void RXEndpoint::registerParameters()
 
   if (OPT_HAS_SERVO_OUTPUT)
   {
-#if defined(M0139)
-    registerParameter(&luaPwmArmed, [](propertiesCommon* item, int32_t arg) {
-      servoSetArmed(arg != 0);
-    });
-#endif
     luaparamMappingChannelOut(&luaMappingOutputMode.common, luaMappingChannelOut.properties.u.value);
     registerParameter(&luaMappingFolder);
     registerParameter(&luaMappingChannelOut, [&](propertiesCommon* item, uint8_t arg) {
@@ -1596,72 +1439,10 @@ void RXEndpoint::registerParameters()
     registerParameter(&luaMappingChannelIn, &luaparamMappingChannelIn, luaMappingFolder.common.id);
     registerParameter(&luaMappingOutputMode, &luaparamMappingOutputMode, luaMappingFolder.common.id);
     registerParameter(&luaMappingInverted, &luaparamMappingInverted, luaMappingFolder.common.id);
-#if defined(M0139)
-    registerParameter(&luaMappingNarrow, [](propertiesCommon* item, int32_t arg) {
-      rx_config_pwm_t channel = getSelectedPwmConfig();
-      channel.val.narrow = arg;
-      saveSelectedPwmConfig(channel);
-    }, luaMappingFolder.common.id);
-    registerParameter(&luaMappingFailsafeMode, [](propertiesCommon* item, int32_t arg) {
-      rx_config_pwm_t channel = getSelectedPwmConfig();
-      channel.val.failsafeMode = arg;
-      saveSelectedPwmConfig(channel);
-    }, luaMappingFolder.common.id);
-    registerParameter(&luaMappingFailsafeValue, [](propertiesCommon* item, int32_t arg) {
-      rx_config_pwm_t channel = getSelectedPwmConfig();
-      channel.val.failsafe = constrain(arg, US_CHANNEL_VALUE_MIN, US_CHANNEL_VALUE_MAX) - US_CHANNEL_VALUE_MIN;
-      saveSelectedPwmConfig(channel);
-    }, luaMappingFolder.common.id);
-    registerParameter(&luaMappingMapMode, [](propertiesCommon* item, int32_t arg) {
-      rx_config_pwm_t channel = getSelectedPwmConfig();
-      channel.val.mapMode = arg;
-      saveSelectedPwmConfig(channel);
-    }, luaMappingFolder.common.id);
-    registerParameter(&luaMappingInput1, &setSelectedMapValue, luaMappingFolder.common.id);
-    registerParameter(&luaMappingInput2, &setSelectedMapValue, luaMappingFolder.common.id);
-    registerParameter(&luaMappingInput3, &setSelectedMapValue, luaMappingFolder.common.id);
-    registerParameter(&luaMappingOutput1, &setSelectedMapValue, luaMappingFolder.common.id);
-    registerParameter(&luaMappingOutput2, &setSelectedMapValue, luaMappingFolder.common.id);
-    registerParameter(&luaMappingOutput3, &setSelectedMapValue, luaMappingFolder.common.id);
-    registerParameter(&luaMappingRequiresArm, [](propertiesCommon* item, int32_t arg) {
-      rx_config_pwm_t channel = getSelectedPwmConfig();
-      channel.val.requiresArm = arg;
-      saveSelectedPwmConfig(channel);
-    }, luaMappingFolder.common.id);
-#endif
     registerParameter(&luaSetFailsafe, [&](propertiesCommon* item, uint8_t arg) {
         luaparamSetFailsafe(item, arg);
     });
   }
-
-#if defined(M0139)
-  memcpy(pendingUid, config.GetUID(), UID_LEN);
-  registerParameter(&luaUidFolder);
-  registerParameter(&luaUid0, &setPendingUidByte, luaUidFolder.common.id);
-  registerParameter(&luaUid1, &setPendingUidByte, luaUidFolder.common.id);
-  registerParameter(&luaUid2, &setPendingUidByte, luaUidFolder.common.id);
-  registerParameter(&luaUid3, &setPendingUidByte, luaUidFolder.common.id);
-  registerParameter(&luaUid4, &setPendingUidByte, luaUidFolder.common.id);
-  registerParameter(&luaUid5, &setPendingUidByte, luaUidFolder.common.id);
-  registerParameter(&luaApplyUid, [this](propertiesCommon* item, int32_t arg) {
-    if (arg == lcsClick)
-    {
-      sendCommandResponse(&luaApplyUid, lcsAskConfirm, "Apply receiver UID?");
-    }
-    else if (arg == lcsConfirmed)
-    {
-      sendCommandResponse(&luaApplyUid, lcsExecuting, "Applying...");
-      deferExecutionMillis(200, []() {
-        pendingUidDirty = false;
-        UpdateUID(pendingUid);
-      });
-    }
-    else
-    {
-      sendCommandResponse(&luaApplyUid, lcsIdle, STR_EMPTYSPACE);
-    }
-  }, luaUidFolder.common.id);
-#endif
 
   registerParameter(&luaBindStorage, [](propertiesCommon* item, uint8_t arg) {
     config.SetBindStorage((rx_config_bindstorage_t)arg);
@@ -1759,23 +1540,7 @@ void RXEndpoint::updateParameters()
     setUint8Value(&luaMappingChannelIn, pwmCh->val.inputChannel + 1);
     setTextSelectionValue(&luaMappingOutputMode, sanitizePwmMode(pwmCh->val.mode));
     setTextSelectionValue(&luaMappingInverted, pwmCh->val.inverted);
-#if defined(M0139)
-    updateModalPwmParameters(pwmCh);
-#endif
   }
-
-#if defined(M0139)
-  if (!pendingUidDirty)
-  {
-    memcpy(pendingUid, config.GetUID(), UID_LEN);
-  }
-  setUint8Value(&luaUid0, pendingUid[0]);
-  setUint8Value(&luaUid1, pendingUid[1]);
-  setUint8Value(&luaUid2, pendingUid[2]);
-  setUint8Value(&luaUid3, pendingUid[3]);
-  setUint8Value(&luaUid4, pendingUid[4]);
-  setUint8Value(&luaUid5, pendingUid[5]);
-#endif
 
   if (config.GetModelId() == 255)
   {
@@ -1804,5 +1569,5 @@ void RXEndpoint::updateParameters()
     LUA_FIELD_HIDE(luaTargetSysId)
   }
 }
-#endif // M0139
+#endif
 #endif
