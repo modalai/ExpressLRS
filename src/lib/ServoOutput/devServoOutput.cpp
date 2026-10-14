@@ -404,7 +404,14 @@ static void configureOutputPins()
                 DBGLN("Initializing PWM output: ch: %d, pin: %d", ch, pin);
             }
 
-#if !defined(M0139)
+#if defined(M0139)
+            // The timers own the PWM pins (PWM.initialize, PWM.allocate); an On/Off pin is a GPIO
+            if (mode == somOnOff)
+            {
+                pinMode(pin, OUTPUT);
+                digitalWrite(pin, LOW);
+            }
+#else
             pinMode(pin, OUTPUT);
             digitalWrite(pin, LOW);
 #endif
