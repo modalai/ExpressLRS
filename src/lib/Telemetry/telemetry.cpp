@@ -61,6 +61,13 @@ bool Telemetry::ShouldCallOverridePWM()
     return pwmOvr;
 }
 
+bool Telemetry::ShouldCallPinOutput()
+{
+    bool pinOut = callPinOutput;
+    callPinOutput = false;
+    return pinOut;
+}
+
 bool Telemetry::ShouldCallUpdateUID()
 {
     bool updateID = callUpdateUID;
@@ -333,6 +340,15 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
             return true;
         }
 #endif
+        if (header->frame_size >= CRSF_EXT_FRAME_SIZE(sizeof(pin_output_t))
+            && header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER
+            && header->orig_addr == CRSF_ADDRESS_FLIGHT_CONTROLLER
+            && header->payload[0] == PWMCmd::SET_PIN_OUTPUT)
+        {
+            callPinOutput = true;
+            memcpy(&pinOutputCommand, &header->payload[0], sizeof(pinOutputCommand));
+            return true;
+        }
     }
 
     if (header->type == CRSF_FRAMETYPE_DEVICE_PING && header->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER)

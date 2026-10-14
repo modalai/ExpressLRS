@@ -12,4 +12,5 @@ public:
 
 private:
     void processBytes(uint8_t *bytes, uint16_t size) override;
+    void sendPinOutputAck(uint8_t pinIndex, uint8_t status);
 };

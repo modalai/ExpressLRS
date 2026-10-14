@@ -225,6 +225,78 @@ void test_function_parameter_request_requires_argument(void)
     TEST_ASSERT_FALSE(telemetry.ShouldCallParameterRequest());
 }
 
+void test_function_pin_output_command(void)
+{
+    telemetry.ResetState();
+    // SET_PIN_OUTPUT: pin index 1, 1500us big-endian
+    uint8_t frame[] = {
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 4,
+        CRSF_FRAMETYPE_COMMAND,
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_ADDRESS_FLIGHT_CONTROLLER,
+        SET_PIN_OUTPUT,
+        1,
+        0x05,
+        0xDC,
+        0
+    };
+    setCrsfCrc(frame);
+
+    TEST_ASSERT_EQUAL(sizeof(frame), sendData(frame, sizeof(frame)));
+    TEST_ASSERT_TRUE(telemetry.ShouldCallPinOutput());
+    TEST_ASSERT_FALSE(telemetry.ShouldCallPinOutput());
+    TEST_ASSERT_FALSE(telemetry.ShouldCallOverridePWM());
+    const pin_output_t command = telemetry.GetPinOutput();
+    TEST_ASSERT_EQUAL(SET_PIN_OUTPUT, command.command);
+    TEST_ASSERT_EQUAL(1, command.pin_index);
+    const uint8_t *us = (const uint8_t *)&command.us_output;
+    TEST_ASSERT_EQUAL(0x05, us[0]);
+    TEST_ASSERT_EQUAL(0xDC, us[1]);
+}
+
+void test_function_pin_output_requires_value(void)
+{
+    telemetry.ResetState();
+    // The pulse width is missing
+    uint8_t frame[] = {
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 2,
+        CRSF_FRAMETYPE_COMMAND,
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_ADDRESS_FLIGHT_CONTROLLER,
+        SET_PIN_OUTPUT,
+        1,
+        0
+    };
+    setCrsfCrc(frame);
+
+    sendDataWithoutCheck(frame, sizeof(frame));
+    TEST_ASSERT_FALSE(telemetry.ShouldCallPinOutput());
+}
+
+void test_function_pin_output_only_from_fc(void)
+{
+    telemetry.ResetState();
+    // From the handset, not the FC
+    uint8_t frame[] = {
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_FRAME_LENGTH_EXT_TYPE_CRC + 4,
+        CRSF_FRAMETYPE_COMMAND,
+        CRSF_ADDRESS_CRSF_RECEIVER,
+        CRSF_ADDRESS_RADIO_TRANSMITTER,
+        SET_PIN_OUTPUT,
+        1,
+        0x05,
+        0xDC,
+        0
+    };
+    setCrsfCrc(frame);
+
+    sendDataWithoutCheck(frame, sizeof(frame));
+    TEST_ASSERT_FALSE(telemetry.ShouldCallPinOutput());
+}
+
 void test_function_store_unknown_type(void)
 {
     telemetry.ResetState();
@@ -318,6 +390,9 @@ int main(int argc, char **argv)
     RUN_TEST(test_function_parameter_read_request);
     RUN_TEST(test_function_parameter_write_request);
     RUN_TEST(test_function_parameter_request_requires_argument);
+    RUN_TEST(test_function_pin_output_command);
+    RUN_TEST(test_function_pin_output_requires_value);
+    RUN_TEST(test_function_pin_output_only_from_fc);
     RUN_TEST(test_function_battery);
     RUN_TEST(test_function_replace_old);
     RUN_TEST(test_function_do_not_replace_old_locked);

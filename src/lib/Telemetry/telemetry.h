@@ -14,6 +14,7 @@ enum CustomTelemSubTypeID : uint8_t {
 enum PWMCmd : uint8_t {
     SET_PWM_CH = 0xF3,
     SET_PWM_VAL = 0xF4,
+    SET_PIN_OUTPUT = 0xF5,
     SET_PWM_DEFAULT = 0xFF
 };
 
@@ -22,6 +23,36 @@ typedef struct pwm_val_override_t {
     uint8_t rc_channel;
     uint16_t crsf_channel_value;
 } __attribute__((packed)) pwm_val_override_t;
+
+// Result of a SET_PIN_OUTPUT command, returned to the FC in the acknowledgement
+enum PinOutputStatus : uint8_t {
+    PIN_OUTPUT_OK = 0,          // the pin outputs the commanded value
+    PIN_OUTPUT_RELEASED = 1,    // the pin follows its input channel or failsafe again
+    PIN_OUTPUT_NEEDS_ARM = 2,   // accepted, but the pin holds its failsafe until the outputs are armed
+    PIN_OUTPUT_BAD_PIN = 3,     // no such pin
+    PIN_OUTPUT_BAD_MODE = 4,    // the pin's output mode is not servo PWM, on/off or duty
+    PIN_OUTPUT_BAD_VALUE = 5,   // the value is outside PIN_OUTPUT_MIN_US..PIN_OUTPUT_MAX_US
+};
+
+// Drives one pin with a raw pulse width, bypassing its input channel and map.
+// The pin returns to its input channel or failsafe 1 s after the last command,
+// or at once when us_output is 0.
+typedef struct pin_output_t {
+    uint8_t command;    // SET_PIN_OUTPUT
+    uint8_t pin_index;  // 0-based
+    uint16_t us_output; // big-endian
+} __attribute__((packed)) pin_output_t;
+
+// The RX answers every SET_PIN_OUTPUT with this frame, sent to the FC
+typedef struct pin_output_ack_t {
+    uint8_t command;    // SET_PIN_OUTPUT
+    uint8_t pin_index;
+    uint8_t status;     // PinOutputStatus
+    uint16_t us_output; // big-endian, what the pin outputs now (0 for no pulses or unknown)
+} __attribute__((packed)) pin_output_ack_t;
+
+constexpr uint16_t PIN_OUTPUT_MIN_US = 800U;
+constexpr uint16_t PIN_OUTPUT_MAX_US = 2200U;
 
 typedef enum {
     TELEMETRY_IDLE = 0,
@@ -71,6 +102,7 @@ public:
     bool ShouldCallUnbind();
     bool ShouldCallUpdatePWM();
     bool ShouldCallOverridePWM();
+    bool ShouldCallPinOutput();
     bool ShouldCallUpdateModelMatch();
     bool ShouldSendDeviceFrame();
     void CheckCrsfBatterySensorDetected();
@@ -95,6 +127,7 @@ public:
     rx_pwm_config_in GetPwmInput(){ return pwmInput;}
     pwm_val_override_t GetPwmOverride(){ return pwmValueOverride; }
 #endif
+    pin_output_t GetPinOutput(){ return pinOutputCommand; }
 private:
     bool processInternalTelemetryPackage(uint8_t *package);
     void AppendToPackage(volatile crsf_telemetry_package_t *current);
@@ -116,6 +149,7 @@ private:
     bool callUpdateUID;
     bool callUpdatePWM;
     bool callOverridePWM;
+    bool callPinOutput;
     bool callParameterRequest;
     uint8_t modelMatchId;
     uint8_t paramRequestType;
@@ -125,4 +159,5 @@ private:
     pwm_val_override_t pwmValueOverride;
     rx_pwm_config_in pwmInput;
 #endif
+    pin_output_t pinOutputCommand;
 };

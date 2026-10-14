@@ -21,6 +21,8 @@ extern pwm_val_override_t pwmOverride;
 extern bool pwmIsArmed;
 
 uint16_t servoGetLastOutputUs(uint8_t ch);
+// Drive one pin directly (SET_PIN_OUTPUT); returns what the receiver did with it
+PinOutputStatus servoSetPinOutput(const pin_output_t &command);
 
 // Notify this unit that new channel data has arrived
 void servoNewChannelsAvailable();

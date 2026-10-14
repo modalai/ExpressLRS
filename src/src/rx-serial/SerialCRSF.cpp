@@ -5,6 +5,9 @@
 #include "telemetry.h"
 #include "logging.h"
 #include "lua.h"
+#if defined(GPIO_PIN_PWM_OUTPUTS)
+#include "devServoOutput.h"
+#endif
 #if defined(USE_MSP_WIFI)
 #include "msp2crsf.h"
 
@@ -163,6 +166,34 @@ void SerialCRSF::queueMSPFrameTransmission(uint8_t* data)
     }
 }
 
+/**
+ * Answer a SET_PIN_OUTPUT command so the FC knows the RX supports it and what the pin does now
+ */
+void SerialCRSF::sendPinOutputAck(uint8_t pinIndex, uint8_t status)
+{
+#ifdef GPIO_PIN_PWM_OUTPUTS
+    uint8_t frame[sizeof(crsf_ext_header_t) + sizeof(pin_output_ack_t) + CRSF_FRAME_CRC_SIZE];
+    uint16_t us = servoGetLastOutputUs(pinIndex);
+    if (us == UINT16_MAX)
+    {
+        us = 0;
+    }
+    const pin_output_ack_t ack = {
+        SET_PIN_OUTPUT,
+        pinIndex,
+        status,
+        (uint16_t)(((us & 0xFF) << 8) | ((us & 0xFF00) >> 8)),   // big-endian on the wire
+    };
+    memcpy(frame + sizeof(crsf_ext_header_t), &ack, sizeof(ack));
+    CRSF::SetExtendedHeaderAndCrc(frame, CRSF_FRAMETYPE_COMMAND, CRSF_EXT_FRAME_SIZE(sizeof(ack)),
+                                  CRSF_ADDRESS_CRSF_RECEIVER, CRSF_ADDRESS_FLIGHT_CONTROLLER);
+    queueMSPFrameTransmission(frame);
+#else
+    (void)pinIndex;
+    (void)status;
+#endif
+}
+
 void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
 {
     // Set the current instance for parameter callback
@@ -213,6 +244,13 @@ void SerialCRSF::processBytes(uint8_t *bytes, uint16_t size)
             overridePWM = true;
             pwmOverride = telemetry.GetPwmOverride();
             devicesTriggerEvent();
+#endif // Servo output
+        }
+        if (telemetry.ShouldCallPinOutput())
+        {
+#ifdef GPIO_PIN_PWM_OUTPUTS
+            const pin_output_t command = telemetry.GetPinOutput();
+            sendPinOutputAck(command.pin_index, servoSetPinOutput(command));
 #endif // Servo output
         }
         if (telemetry.ShouldCallParameterRequest())
