@@ -591,6 +591,13 @@ void RXEndpoint::registerParameters()
 
     registerParameter(&luaPwmArmed, [](propertiesCommon *, int32_t arg) {
         servoSetArmed(arg != 0);
+        // Arming touches no config, so nothing else would refresh the parameter: its
+        // value was only rewritten by updateParameters() on the next config or connection
+        // event, and with no link a read-back after the write kept returning the old
+        // state. Report the state now, and let the Output Value fields follow the
+        // change as they do for every other PWM edit.
+        setTextSelectionValue(&luaPwmArmed, servoIsArmed());
+        devicesTriggerEvent(EVENT_CONFIG_PWM_CHANGE);
     });
     registerParameter(&luaMappingFolder);
     for (uint8_t pin = 0; pin < 4; ++pin)
