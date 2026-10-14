@@ -21,6 +21,9 @@ static bool initialized = false;
 static bool pwmIsArmed = false;
 static uint32_t lastOverrideUpdate;
 static uint32_t pwmConfigHash;
+// SET_PIN_OUTPUT overrides: a pin outputs pinOutputUs (0 = none) until 1 s after pinOutputUpdate
+static uint16_t pinOutputUs[PWM_MAX_CHANNELS];
+static uint32_t pinOutputUpdate[PWM_MAX_CHANNELS];
 #endif
 
 #if defined(PLATFORM_ESP32)
@@ -194,10 +197,49 @@ uint16_t servoGetLastOutputUs(uint8_t ch)
 {
     return ch < GPIO_PIN_PWM_OUTPUTS_COUNT ? pwmChannelValues[ch] : UINT16_MAX;
 }
+
+static bool servoModeAcceptsPinOutput(eServoOutputMode mode)
+{
+    // Servo PWM rates, 10 kHz duty and on/off; not DShot, serial or I2C
+    return mode <= somOnOff;
+}
+
+/**
+ * The value a SET_PIN_OUTPUT override drives the pin with, or 0 when none applies:
+ * no override, the last one is older than FAILSAFE_ABS_TIMEOUT_MS, the pin's mode
+ * no longer takes one, or the pin requires arming and the outputs are disarmed.
+ */
+static uint16_t servoPinOutputUs(uint8_t ch)
+{
+    if (pinOutputUs[ch] == 0)
+    {
+        return 0;
+    }
+    if (millis() - pinOutputUpdate[ch] >= FAILSAFE_ABS_TIMEOUT_MS)
+    {
+        pinOutputUs[ch] = 0;
+        return 0;
+    }
+    const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
+    if (!servoModeAcceptsPinOutput((eServoOutputMode)chConfig->val.mode) || (chConfig->val.requiresArm && !pwmIsArmed))
+    {
+        return 0;
+    }
+    return pinOutputUs[ch];
+}
 #endif
 
 static void servoFailsafeChannel(uint8_t ch)
 {
+#if defined(M0139)
+    // A SET_PIN_OUTPUT override outranks failsafe
+    const uint16_t pinUs = servoPinOutputUs(ch);
+    if (pinUs)
+    {
+        servoWrite(ch, pinUs);
+        return;
+    }
+#endif
     const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
     if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION)
     {
@@ -244,12 +286,23 @@ static void servoCalcAllChannels(servoWrite_fn write)
             servoFailsafeChannel(ch);
             continue;
         }
+        // A SET_PIN_OUTPUT override outranks the input channel
+        const uint16_t pinUs = servoPinOutputUs(ch);
+        if (pinUs)
+        {
+            write(ch, pinUs);
+            continue;
+        }
 #endif
         const unsigned crsfVal = ChannelData[chConfig->val.inputChannel];
         // crsfVal might be unset if this is a switch channel, and it has not been
         // received yet. Delay initializing the servo until the channel is valid
         if (crsfVal == CRSF_CHANNEL_VALUE_UNSET)
         {
+#if defined(M0139)
+            // The pin shows failsafe until then, also when a pin override ends first
+            servoFailsafeChannel(ch);
+#endif
             continue;
         }
 
@@ -570,6 +623,47 @@ bool servoOverrideChannel(const modal_pwm_override_t &overrideValue)
     }
     servosUpdate(now);
     return true;
+}
+
+ModalPinOutputStatus servoSetPinOutput(const modal_pin_output_t &command)
+{
+    if (command.pinIndex >= GPIO_PIN_PWM_OUTPUTS_COUNT)
+    {
+        return PIN_OUTPUT_BAD_PIN;
+    }
+    const uint8_t ch = command.pinIndex;
+    if (!servoModeAcceptsPinOutput((eServoOutputMode)config.GetPwmChannel(ch)->val.mode))
+    {
+        return PIN_OUTPUT_BAD_MODE;
+    }
+    const uint16_t us = be16toh(command.usOutput);
+    if (us != 0 && (us < MODAL_PIN_OUTPUT_MIN_US || us > MODAL_PIN_OUTPUT_MAX_US))
+    {
+        return PIN_OUTPUT_BAD_VALUE;
+    }
+
+    pinOutputUs[ch] = us;
+    pinOutputUpdate[ch] = millis();
+    if (!initialized)
+    {
+        reinitializeOutputs();
+    }
+    // lastUpdate is set while the outputs follow their input channels, and cleared in failsafe.
+    // Recalculating every pin from the same channel data leaves the others unchanged.
+    else if (lastUpdate)
+    {
+        servoCalcAllChannels(&servoWrite);
+    }
+    else
+    {
+        servoFailsafeChannel(ch);
+    }
+
+    if (us == 0)
+    {
+        return PIN_OUTPUT_RELEASED;
+    }
+    return servoPinOutputUs(ch) ? PIN_OUTPUT_OK : PIN_OUTPUT_NEEDS_ARM;
 }
 
 void servoSetArmed(bool armed)

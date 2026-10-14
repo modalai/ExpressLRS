@@ -16,6 +16,9 @@ public:
 #endif
 
 private:
+#if defined(M0139)
+    void sendPinOutputAck(uint8_t pinIndex, uint8_t status);
+#endif
     void luaparamMappingChannelOut(propertiesCommon *item, uint8_t arg);
     void luaparamSetFailsafe(propertiesCommon *item, uint8_t arg);
 };

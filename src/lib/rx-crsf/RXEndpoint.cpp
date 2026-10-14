@@ -1,6 +1,7 @@
 #include "RXEndpoint.h"
 
 #if !defined(UNIT_TEST)
+#include "CRSFRouter.h"
 #include "config.h"
 #include "devMSPVTX.h"
 #include "devVTXSPI.h"
@@ -84,10 +85,42 @@ bool RXEndpoint::handleRaw(const crsf_header_t *message)
             servoOverrideChannel(overrideValue);
             return true;
         }
+        if (extMessage->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER &&
+            extMessage->orig_addr == CRSF_ADDRESS_FLIGHT_CONTROLLER &&
+            extMessage->payload[0] == SET_PIN_OUTPUT &&
+            message->frame_size >= CRSF_EXT_FRAME_SIZE(sizeof(modal_pin_output_t)))
+        {
+            modal_pin_output_t command;
+            memcpy(&command, extMessage->payload, sizeof(command));
+            const ModalPinOutputStatus status = servoSetPinOutput(command);
+            sendPinOutputAck(command.pinIndex, status);
+            return true;
+        }
     }
 #endif
     return false;
 }
+
+#if defined(M0139)
+/**
+ * Answer a SET_PIN_OUTPUT command so the FC knows the RX supports it and what the pin does now
+ */
+void RXEndpoint::sendPinOutputAck(uint8_t pinIndex, uint8_t status)
+{
+    uint8_t frame[sizeof(crsf_ext_header_t) + sizeof(modal_pin_output_ack_t) + CRSF_FRAME_CRC_SIZE];
+    const uint16_t us = servoGetLastOutputUs(pinIndex);
+    const modal_pin_output_ack_t ack = {
+        SET_PIN_OUTPUT,
+        pinIndex,
+        status,
+        htobe16(us == UINT16_MAX ? 0 : us),
+    };
+    memcpy(frame + sizeof(crsf_ext_header_t), &ack, sizeof(ack));
+    crsfRouter.SetExtendedHeaderAndCrc((crsf_ext_header_t *)frame, CRSF_FRAMETYPE_COMMAND, CRSF_EXT_FRAME_SIZE(sizeof(ack)),
+                                       CRSF_ADDRESS_FLIGHT_CONTROLLER, CRSF_ADDRESS_CRSF_RECEIVER);
+    crsfRouter.deliverMessageTo(CRSF_ADDRESS_FLIGHT_CONTROLLER, (crsf_header_t *)frame);
+}
+#endif
 
 void RXEndpoint::handleMessage(const crsf_header_t *message)
 {

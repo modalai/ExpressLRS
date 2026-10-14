@@ -20,6 +20,7 @@ void servoCurrentToFailsafeConfig();
 constexpr uint16_t MODAL_PWM_FAILSAFE_BASE_US = 800U;
 bool servoApplyConfig(const modal_pwm_config_t &newConfig);
 bool servoOverrideChannel(const modal_pwm_override_t &overrideValue);
+ModalPinOutputStatus servoSetPinOutput(const modal_pin_output_t &command);
 uint16_t servoGetLastOutputUs(uint8_t ch);
 void servoSetArmed(bool armed);
 bool servoIsArmed();
