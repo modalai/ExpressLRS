@@ -1180,6 +1180,18 @@ void EnterBindingModeSafely()
   EnterBindingMode();
 }
 
+#if defined(PLATFORM_STM32)
+void reset_into_bootloader()
+{
+  __disable_irq();
+  __HAL_RCC_SYSCFG_CLK_ENABLE();
+  __DSB();
+  __ISB();
+  SCB->VTOR = 0;
+  NVIC_SystemReset();
+}
+#endif
+
 void ProcessMSPPacket(uint32_t now, mspPacket_t *packet)
 {
 #if defined(PLATFORM_ESP32)

@@ -16,6 +16,9 @@ RTC_DATA_ATTR int rtcModelId = 0;
 #endif
 
 void ModelUpdateReq();
+#if defined(PLATFORM_STM32)
+void reset_into_bootloader();
+#endif
 
 void TXModuleEndpoint::begin()
 {
@@ -42,6 +45,19 @@ bool TXModuleEndpoint::handleRaw(const crsf_header_t *message)
         MavlinkEnvelopeFromHandset(message->payload, message->frame_size - 2);
         return true;    // consumed: the payload is MAVLink, not a CRSF message to route
     }
+#if defined(PLATFORM_STM32)
+    // Non CRSF, dest=b src=l -> reboot to bootloader. Flashing tools (voxl-elrs, UARTupload)
+    // send it through the handset passthrough; routed as a CRSF frame it would go to address 'b'.
+    if (message->sync_byte == CRSF_ADDRESS_CRSF_TRANSMITTER && message->frame_size >= 4 && message->type == CRSF_FRAMETYPE_COMMAND)
+    {
+        const uint8_t *payload = (const uint8_t *)message + sizeof(crsf_header_t);
+        if (payload[0] == 'b' && payload[1] == 'l')
+        {
+            reset_into_bootloader();
+            return true;
+        }
+    }
+#endif
     return false;
 }
 
