@@ -1624,28 +1624,40 @@ static void setupBindingFromConfig()
 }
 
 #if defined(M0139)
-void EnterUnbindMode()
+void UpdateUID(const uint8_t *newUid)
 {
   hwTimer::stop();
   while (busyTransmitting);
 
-  uint32_t seed = psuedo_rand(millis() ^ HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2());
-  const uint32_t uidLower = psuedo_rand(seed);
-  const uint32_t uidUpper = psuedo_rand(uidLower);
-  UID[0] = (uidLower >> 24) & 0xFF;
-  UID[1] = (uidLower >> 16) & 0xFF;
-  UID[2] = (uidLower >> 8) & 0xFF;
-  UID[3] = uidLower & 0xFF;
-  UID[4] = (uidUpper >> 24) & 0xFF;
-  UID[5] = (uidUpper >> 16) & 0xFF;
-
+  if (InBindingMode)
+  {
+    DataUlSender.ResetState();
+    InBindingMode = false;
+  }
+  memcpy(UID, newUid, UID_LEN);
   config.SetUID(UID);
   config.Commit();
   OtaUpdateCrcInitFromUid();
   FHSSrandomiseFHSSsequence(OtaGetUidSeed());
-  SetRFLinkRate(config.GetRate());
+  SetRFLinkRate(config.GetRate(), true);
   devicesTriggerEvent(EVENT_CONFIG_UID_CHANGED);
   hwTimer::resume();
+}
+
+void EnterUnbindMode()
+{
+  uint32_t seed = psuedo_rand(millis() ^ HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2());
+  const uint32_t uidLower = psuedo_rand(seed);
+  const uint32_t uidUpper = psuedo_rand(uidLower);
+  const uint8_t newUid[UID_LEN] = {
+    (uint8_t)(uidLower >> 24),
+    (uint8_t)(uidLower >> 16),
+    (uint8_t)(uidLower >> 8),
+    (uint8_t)uidLower,
+    (uint8_t)(uidUpper >> 24),
+    (uint8_t)(uidUpper >> 16)
+  };
+  UpdateUID(newUid);
 }
 #endif
 

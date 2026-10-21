@@ -175,9 +175,49 @@ static commandParameter luaBind = {
 static char txUidString[UID_LEN * 2 + 1];
 
 static stringParameter luaUid = {
-    {"UID", CRSF_INFO},
-    txUidString
+    {"UID", CRSF_STRING},
+    txUidString,
+    UID_LEN * 2
 };
+
+static void formatTxUidString()
+{
+    static constexpr char hex[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        txUidString[i * 2] = hex[UID[i] >> 4];
+        txUidString[i * 2 + 1] = hex[UID[i] & 0x0F];
+    }
+    txUidString[UID_LEN * 2] = '\0';
+}
+
+static bool parseTxUidString(const char *input, uint8_t *uid)
+{
+    for (uint8_t i = 0; i < UID_LEN * 2; ++i)
+    {
+        const char c = input[i];
+        int8_t nibble;
+        if (c >= '0' && c <= '9') nibble = c - '0';
+        else if (c >= 'A' && c <= 'F') nibble = c - 'A' + 10;
+        else if (c >= 'a' && c <= 'f') nibble = c - 'a' + 10;
+        else return false;
+        if ((i & 1U) == 0) uid[i / 2] = (uint8_t)(nibble << 4);
+        else uid[i / 2] |= (uint8_t)nibble;
+    }
+    return input[UID_LEN * 2] == '\0';
+}
+
+static void txUidCallback(propertiesCommon *item, int32_t arg)
+{
+    UNUSED(item);
+    UNUSED(arg);
+    uint8_t uid[UID_LEN] = {};
+    if (parseTxUidString(txUidString, uid) && OtaUidIsBound(uid) && memcmp(uid, UID, UID_LEN) != 0)
+    {
+        UpdateUID(uid);
+    }
+    formatTxUidString();
+}
 
 static commandParameter luaUnbind = {
     {"Unbind", CRSF_COMMAND},
@@ -865,7 +905,7 @@ void TXModuleEndpoint::registerParameters()
 
   registerParameter(&luaELRSversion);
 #if defined(M0139)
-  registerParameter(&luaUid);
+  registerParameter(&luaUid, txUidCallback);
 #endif
 
   if (HAS_RADIO) {
@@ -1144,13 +1184,7 @@ void TXModuleEndpoint::updateParameters()
     setStringValue(&luaBackpackVersion, backpackVersion);
   }
 #else
-  static constexpr char hex[] = "0123456789ABCDEF";
-  for (uint8_t index = 0; index < UID_LEN; ++index)
-  {
-    txUidString[index * 2] = hex[UID[index] >> 4];
-    txUidString[index * 2 + 1] = hex[UID[index] & 0x0F];
-  }
-  txUidString[UID_LEN * 2] = '\0';
+  formatTxUidString();
   setStringValue(&luaUid, txUidString);
 #endif
   updateFolderNamesAndVisibility();
