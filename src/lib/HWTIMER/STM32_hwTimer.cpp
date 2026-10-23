@@ -34,10 +34,15 @@ void hwTimer::init(void (*callbackTick)(), void (*callbackTock)())
         hwTimer::callbackTock = callbackTock;
         MyTim->attachInterrupt(hwTimer::callback);
         MyTim->setMode(1, TIMER_DISABLED);
-#if defined(TARGET_TX) && 0
-        // The prescaler only adjusts AFTER the overflow interrupt fires so
-        // to make Pause() work, the prescaler needs to be fixed to avoid
-        // having to ramp between prescalers
+#if defined(TARGET_TX)
+        // The TX changes its interval while the timer runs (SetRFLinkRate()). In
+        // MICROSEC_FORMAT, setOverflow() picks a prescaler to suit each interval, but the
+        // prescaler only loads at the next update event while the auto-reload (preload off)
+        // applies at once, so the first half-period after a rate change ran with the old
+        // prescaler and the new reload: 100Hz to 200Hz gave a 7.5ms period, not 5ms. The
+        // receiver locks on to the first sync packets at the new rate, so that slip left it
+        // half a slot off the transmitter until it timed out and re-acquired. A fixed 1us
+        // tick keeps every period exact (16-bit reload: half-periods up to 65ms).
         MyTim->setPrescaleFactor(MyTim->getTimerClkFreq() / 1000000); // 1us per tick
         MyTim->setOverflow(HWtimerInterval >> 1, TICK_FORMAT);
 #else
@@ -76,7 +81,7 @@ void hwTimer::resume()
     isTick = false;
 #endif
     running = true;
-#if defined(TARGET_TX) && 0
+#if defined(TARGET_TX)
     MyTim->setOverflow(HWtimerInterval >> 1, TICK_FORMAT);
 #else
     MyTim->setOverflow((HWtimerInterval >> 1), MICROSEC_FORMAT);
@@ -114,7 +119,7 @@ void hwTimer::callback(void)
         //     MyTim->setOverflow(HWtimerInterval >> 1, TICK_FORMAT);
         // }
         // No tick callback
-        MyTim->setOverflow((HWtimerInterval >> 1), MICROSEC_FORMAT);
+        MyTim->setOverflow((HWtimerInterval >> 1), TICK_FORMAT);
 #else
         MyTim->setOverflow((HWtimerInterval >> 1), MICROSEC_FORMAT);
         uint32_t adjustedInterval = MyTim->getOverflow(MICROSEC_FORMAT) + FreqOffset;
@@ -125,7 +130,7 @@ void hwTimer::callback(void)
     else
     {
 #if defined(TARGET_TX)
-        MyTim->setOverflow((HWtimerInterval >> 1) + PhaseShift, MICROSEC_FORMAT);
+        MyTim->setOverflow((HWtimerInterval >> 1) + PhaseShift, TICK_FORMAT);
         hwTimer::callbackTock();
 #else
         MyTim->setOverflow((HWtimerInterval >> 1) + PhaseShift, MICROSEC_FORMAT);
