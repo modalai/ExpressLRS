@@ -351,7 +351,7 @@ uint8_t adjustPacketRateForBaud(uint8_t rateIndex)
   return rateIndex = get_elrs_HandsetRate_max(rateIndex, handset->getMinPacketInterval());
 }
 
-void SetRFLinkRate(uint8_t index) // Set speed of RF link
+void SetRFLinkRate(uint8_t index, bool force = false) // Set speed of RF link
 {
   expresslrs_mod_settings_s *const ModParams = get_elrs_airRateConfig(index);
   expresslrs_rf_pref_params_s *const RFperf = get_elrs_RFperfParams(index);
@@ -359,7 +359,8 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   bool invertIQ = InBindingMode || (UID[5] & 0x01);
   OtaSwitchMode_e newSwitchMode = (OtaSwitchMode_e)config.GetSwitchMode();
 
-  if ((ModParams == ExpressLRS_currAirRate_Modparams)
+  if (!force
+    && (ModParams == ExpressLRS_currAirRate_Modparams)
     && (RFperf == ExpressLRS_currAirRate_RFperfParams)
     && (OtaSwitchModeCurrent == newSwitchMode)
     && (!InBindingMode))
@@ -772,8 +773,34 @@ void ResetPower()
 static void ChangeRadioParams()
 {
   ModelUpdatePending = false;
-  FHSSrandomiseFHSSsequence(uidMacSeedGet());
-  SetRFLinkRate(config.GetRate());
+  // FHSSrandomiseFHSSsequence() zeroes FHSSptr as a side effect, but OtaNonce is only reset
+  // together with it in SetRFLinkRate(), which returns early when the rate is unchanged. Any
+  // other config commit (antenna mode, power, telemetry ratio, model match...) therefore left
+  // the TX hopping from index 0 while the receiver kept its place; the sync packet carries
+  // fhssIndex but the receiver cannot hear the sync channel from there. It caught ~3% of
+  // packets where the two sequences happened to agree, enough to never time out, so RC stayed
+  // at a few percent for minutes. Keep the index unless the domain changed, and then force
+  // the reconfigure so both reset together (same fix as 21e195b8 on 4.x). Interrupts stay off
+  // across the rebuild: the timer still advances FHSSptr during a commit (nonceAdvance()).
+  bool domainChanged = true;
+  noInterrupts();
+  if (FHSSconfig != nullptr)
+  {
+    const fhss_config_t previousDomain = *FHSSconfig;
+    const uint8_t previousFhssIdx = FHSSgetCurrIndex();
+    FHSSrandomiseFHSSsequence(uidMacSeedGet());
+    domainChanged = FHSSconfig->freq_start != previousDomain.freq_start
+                 || FHSSconfig->freq_stop != previousDomain.freq_stop
+                 || FHSSconfig->freq_count != previousDomain.freq_count;
+    if (!domainChanged)
+      FHSSsetCurrIndex(previousFhssIdx);
+  }
+  else
+  {
+    FHSSrandomiseFHSSsequence(uidMacSeedGet());
+  }
+  interrupts();
+  SetRFLinkRate(config.GetRate(), domainChanged);
   ResetPower();
 }
 
