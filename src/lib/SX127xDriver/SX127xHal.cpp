@@ -108,7 +108,9 @@ void SX127xHal::init()
     SPI_1.setDataMode(SPI_MODE0);
     //SPI_1.setSSEL(GPIO_PIN_NSS);
     SPI_1.begin();
-    SPI_1.setClockDivider(SPI_CLOCK_DIV4); // 72 / 8 = 9 MHz
+    // SPI1 is on APB2 (72MHz): DIV8 = 9MHz, within the SX1276's 10MHz SPI limit.
+    // (DIV4 gave 18MHz, out of spec.) SPI2 is on APB1 (36MHz): DIV4 = 9MHz.
+    SPI_1.setClockDivider(SPI_CLOCK_DIV8);
 #if defined(DUAL_RADIO)
     DBGLN("DUAL M0139");
     SPI_2.setMOSI(GPIO_PIN_MOSI_2);
