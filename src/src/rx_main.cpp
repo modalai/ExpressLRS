@@ -77,6 +77,21 @@
 #define DIVERSITY_ANTENNA_INTERVAL 5
 #define DIVERSITY_ANTENNA_RSSI_TRIGGER 5
 #define PACKET_TO_TOCK_SLACK 200 // Desired buffer time between Packet ISR and Tock ISR
+#if defined(M0139)
+// With 200us, RxDone lands up to ~100us after the tock on this board (DIO0 ISR + FIFO read
+// jitter), and a telemetry send at that tock aborts the packet still arriving. At TLM 1:2 every
+// RC packet is followed by a telemetry tock, so the phase lock only ever sees the early packets,
+// pulls the tock earlier still and RC reception collapses (1:4 lost ~1 in 12). 500us keeps RxDone
+// clear of the tock. The telemetry then ends 500us later at the TX: still >= 1.9ms before its next
+// slot for 10ms slots and longer, but the 5ms slots (200Hz, D50) have ~1.2ms in all and the TX
+// stopped hearing telemetry there, so those keep the stock slack.
+static inline uint32_t packetToTockSlack()
+{
+    return ExpressLRS_currAirRate_Modparams->interval >= 10000 ? 500 : PACKET_TO_TOCK_SLACK;
+}
+#else
+static inline uint32_t packetToTockSlack() { return PACKET_TO_TOCK_SLACK; }
+#endif
 ///////////////////
 
 device_affinity_t ui_devices[] = {
@@ -1159,7 +1174,7 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
         return false;
     }
 
-    PFDloop.extEvent(beginProcessing + PACKET_TO_TOCK_SLACK);
+    PFDloop.extEvent(beginProcessing + packetToTockSlack());
 
     doStartTimer = false;
     unsigned long now = millis();
