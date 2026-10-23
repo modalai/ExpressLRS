@@ -756,6 +756,9 @@ void ICACHE_RAM_ATTR timerCallback()
   // must run the decode: leaving it pending another slot validates it against the wrong
   // nonce and silently drops the telemetry.
   const uint8_t nonceForPendingTlm = OtaNonce;
+  // Sampled once, the DIO0 ISR can set it at any time. A pending flag does not always mean
+  // a packet (a Gemini TxDone can raise one), so such a slot is judged after the decode.
+  const bool telemPending = TelemetryRcvPhase == ttrpExpectingTelem && Radio.HasPendingRx();
 #endif
 
   // Nonce advances on every timer tick
@@ -778,7 +781,7 @@ void ICACHE_RAM_ATTR timerCallback()
   }
   else if (TelemetryRcvPhase == ttrpExpectingTelem && !LqTQly.currentIsSet()
 #if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
-           && !Radio.HasPendingRx()   // it did arrive, it is just not decoded yet
+           && !telemPending   // judged after the deferred decode below
 #endif
           )
   {
@@ -792,6 +795,10 @@ void ICACHE_RAM_ATTR timerCallback()
 
 #if defined(RADIO_SX127X) && defined(PLATFORM_STM32)
   ProcessDeferredTlm(nonceForPendingTlm);
+  if (telemPending && !LqTQly.currentIsSet())
+  {
+    DynamicPower_TelemetryUpdate(DYNPOWER_UPDATE_MISSED);
+  }
 #endif
 }
 
