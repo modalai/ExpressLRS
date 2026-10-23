@@ -693,8 +693,8 @@ void ICACHE_RAM_ATTR SX127xDriver::IsrCallback(SX12XX_Radio_Number_t radioNumber
 {
     if (instance->rxIsrDeferred && instance->currOpmode == SX127x_OPMODE_RXCONTINUOUS)
     {
-        // In RX mode DIO0 can only mean RxDone. Do not touch the SPI bus here: this
-        // ISR outranks the RF timer ISR and any SPI traffic delays the transmit instant.
+        // Do not touch the SPI bus here: this ISR outranks the RF timer ISR and any SPI
+        // traffic delays the transmit instant. ProcessPendingRx() checks what fired.
         instance->pendingRxRadios |= radioNumber;
         return;
     }
@@ -730,14 +730,27 @@ void ICACHE_RAM_ATTR SX127xDriver::ProcessPendingRx()
         const SX12XX_Radio_Number_t radioNumber = (pending & SX12XX_Radio_1) ? SX12XX_Radio_1 : SX12XX_Radio_2;
         pending &= ~radioNumber;
 
-        // The ISR only ever defers RxDone, so go straight to the RX path rather than
-        // re-reading and dispatching the IRQ flags. Going through HandleIrq() would also
-        // observe a TxDone from a transmit already in flight, and its ClearIrqFlags(ALL)
-        // would swallow the interrupt that drives the FHSS hop. Only RxDone is cleared,
-        // for the same reason.
-        processingPacketRadio = radioNumber;
-        RXnbISR(radioNumber);
-        hal.writeRegister(SX127X_REG_IRQ_FLAGS, SX127X_CLEAR_IRQ_FLAG_RX_DONE, radioNumber);
+        // A deferred DIO0 is not always RxDone. DIO0 is mapped to RxDone|TxDone, and with
+        // both radios transmitting (Gemini) the second radio's TxDone edge stays latched in
+        // its EXTI while the first radio's TxDone handler switches to RX, so it is deferred
+        // here with no packet behind it. Reading the FIFO anyway re-delivers the last packet
+        // as SX12XX_RX_OK, and it passes the CRC once per nonce wrap: the TX then never sees
+        // the link drop. Check RxDone as the non-deferred IsrCallback does.
+        // Do not dispatch through HandleIrq() though: its ClearIrqFlags(ALL) also clears the
+        // other radio, which may be about to finish the transmit that drives the FHSS hop.
+        const uint8_t irqStatus = GetIrqFlags(radioNumber);
+        if (irqStatus & SX127X_CLEAR_IRQ_FLAG_RX_DONE)
+        {
+            processingPacketRadio = radioNumber;
+            RXnbISR(radioNumber);
+        }
+        // Clear every flag that was set, not just RxDone: a flag left set holds DIO0 high, so
+        // the next TxDone on this radio raises no edge. Once both radios are in that state
+        // (e.g. ValidHeader left over from a telemetry slot), no TxDone is ever handled: no
+        // hop, busyTransmitting stays set, and the next config commit spins on it for good.
+        // A TxDone seen here is from an earlier transmit -- this runs right after the next
+        // one started, which takes milliseconds -- and only the bits read above are cleared.
+        hal.writeRegister(SX127X_REG_IRQ_FLAGS, irqStatus, radioNumber);
     }
 }
 
