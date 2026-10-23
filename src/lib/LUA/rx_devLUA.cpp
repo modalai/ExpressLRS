@@ -751,6 +751,16 @@ static struct luaItem_command luaUnbindMode = {
     STR_EMPTYSPACE
 };
 
+// Bind State: lets the FC side tell a receiver that is binding from one that has simply
+// lost the link. Both look the same on the wire (no link statistics, no RC frames), and
+// the LED pattern was the only other way to see it. The value strings are matched by
+// name in voxl-elrs and must stay the same as the 4.x branch.
+static struct luaItem_string luaBindState = {
+    {"Bind State", CRSF_INFO},
+    STR_EMPTYSPACE,
+    0
+};
+
 // Old PWM callbacks removed - replaced with minimal per-pin callbacks above
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
@@ -1340,6 +1350,8 @@ static void registerLuaParameters()
   registerLUAParameter(&luaModelNumber);
   registerLUAParameter(&luaVersion);
   registerLUAParameter(&luaCommitHash);
+  // Appended so every existing parameter index stays where it was
+  registerLUAParameter(&luaBindState);
   registerLUAParameter(nullptr);
 }
 
@@ -1347,6 +1359,32 @@ static void updateBindModeLabel()
 {
   // Always show "Enter Bind Mode"
   luaBindMode.common.name = "Bind";
+}
+
+// Unbind leaves the UID all-FF ("never matches a TX") rather than zero, and ModalAI
+// config defaults start there too. UID_IS_BOUND() only knows the all-zero form, and a
+// receiver with an all-FF UID neither links nor enters bind mode on its own.
+static bool uidIsUnbound(const uint8_t *uid)
+{
+  if (!UID_IS_BOUND(uid))
+    return true;
+  for (uint8_t i = 0; i < UID_LEN; ++i)
+  {
+    if (uid[i] != 0xFF)
+      return false;
+  }
+  return true;
+}
+
+static void updateBindStateString()
+{
+  // InBindingMode first: an all-zero UID makes the receiver enter binding mode on its own
+  if (InBindingMode)
+    setLuaStringValue(&luaBindState, "Binding");
+  else if (uidIsUnbound(UID))
+    setLuaStringValue(&luaBindState, "Unbound");
+  else
+    setLuaStringValue(&luaBindState, "Bound");
 }
 
 static void updateUnbindModeLabel()
@@ -1471,6 +1509,7 @@ static int event()
   setLuaTextSelectionValue(&luaBindStorage, config.GetBindStorage());
   updateBindModeLabel();
   updateUnbindModeLabel();
+  updateBindStateString();
 
 #if defined(CUSTOM_DOMAIN_ENABLE)
   setLuaTextSelectionValue(&luaCustomDomainEnable, config.GetCustomDomainEnabled() ? 1 : 0);
