@@ -259,6 +259,18 @@ bool ICACHE_RAM_ATTR ProcessTLMpacket(SX12xxDriverCommon::rx_status const status
   return true;
 }
 
+// The ratio telemetry is boosted to while the MspSender has data (any Lua traffic to the
+// receiver). 1:2 does not hold a link between the M0193 and the M0184 -- the receiver once
+// ignored it outright ("TLM 2 doesn't appear to work normally", a854f7fe) -- so every Other
+// Devices access dropped RC for 10-30 s there. 1:4 holds, at half the boost bandwidth.
+#if defined(M0139)
+static constexpr expresslrs_tlm_ratio_e TLM_RATIO_BOOST = TLM_RATIO_1_4;
+static constexpr uint8_t TLM_BOOST_DENOM = 4;
+#else
+static constexpr expresslrs_tlm_ratio_e TLM_RATIO_BOOST = TLM_RATIO_1_2;
+static constexpr uint8_t TLM_BOOST_DENOM = 2;
+#endif
+
 expresslrs_tlm_ratio_e ICACHE_RAM_ATTR UpdateTlmRatioEffective()
 {
   expresslrs_tlm_ratio_e ratioConfigured = (expresslrs_tlm_ratio_e)config.GetTlm();
@@ -269,7 +281,7 @@ expresslrs_tlm_ratio_e ICACHE_RAM_ATTR UpdateTlmRatioEffective()
   // TLM ratio is boosted for one sync cycle when the MspSender goes active
   if (MspSender.IsActive())
   {
-    retVal = TLM_RATIO_1_2;
+    retVal = TLM_RATIO_BOOST;
   }
   // If Armed, telemetry is disabled, otherwise use STD
   else if (ratioConfigured == TLM_RATIO_DISARMED)
@@ -576,9 +588,9 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
       NextPacketIsMspData = false;
       // counter can be increased even for normal msp messages since it's reset if a real bind message should be sent
       BindingSendCount++;
-      // If the telemetry ratio isn't already 1:2, send a sync packet to boost it
+      // If the telemetry ratio isn't already boosted, send a sync packet to boost it
       // to add bandwidth for the reply
-      if (ExpressLRS_currTlmDenom != 2)
+      if (ExpressLRS_currTlmDenom != TLM_BOOST_DENOM)
         syncSpamCounter = 1;
     }
     else
