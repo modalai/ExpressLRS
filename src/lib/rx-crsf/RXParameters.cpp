@@ -9,6 +9,8 @@
 #include "helpers.h"
 #include "rxtx_intf.h"
 #include "logging.h"
+#include "common.h"
+#include "OTA.h"
 
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
 
@@ -19,6 +21,42 @@ extern void reconfigureSerial1();
 extern bool BindingModeRequest;
 
 extern RXEndpoint crsfReceiver;
+
+// Bind State: lets the FC side tell a receiver that is binding from one that has simply
+// lost the link. Both look the same on the wire (no link statistics, no RC frames), and
+// the LED pattern was the only other way to see it. The value strings are matched by
+// name in voxl-elrs and must stay the same as the 3.5.3 branch.
+static stringParameter luaBindState = {
+    {"Bind State", CRSF_INFO},
+    STR_EMPTYSPACE
+};
+
+// Unbind leaves the UID all-FF ("never matches a TX") rather than zero, and ModalAI
+// config defaults start there too. OtaUidIsBound() only knows the all-zero form, and a
+// receiver with an all-FF UID neither links nor enters bind mode on its own.
+static bool uidIsUnbound(const uint8_t *uid)
+{
+    if (!OtaUidIsBound(uid))
+        return true;
+    for (uint8_t i = 0; i < UID_LEN; ++i)
+    {
+        if (uid[i] != 0xFF)
+            return false;
+    }
+    return true;
+}
+
+static void updateBindStateString()
+{
+    // InBindingMode first: an all-zero UID makes the receiver enter binding mode on
+    // its own, but with Bind Storage set to Administered it stays out of it.
+    if (InBindingMode)
+        luaBindState.value = "Binding";
+    else if (uidIsUnbound(UID))
+        luaBindState.value = "Unbound";
+    else
+        luaBindState.value = "Bound";
+}
 
 #if defined(M0139)
 
@@ -660,6 +698,8 @@ void RXEndpoint::registerParameters()
     registerParameter(&luaModelNumber);
     registerParameter(&luaVersion);
     registerParameter(&luaCommitHash);
+    // Appended so every existing parameter index stays where it was
+    registerParameter(&luaBindState);
 }
 
 void RXEndpoint::updateParameters()
@@ -709,6 +749,7 @@ void RXEndpoint::updateParameters()
         setStringValue(&luaModelNumber, modelString);
     }
     setTextSelectionValue(&luaBindStorage, config.GetBindStorage());
+    updateBindStateString();
 
     LUA_FIELD_HIDE(luaSerialProtocol)
     if (protocol == PROTOCOL_MAVLINK)
@@ -1491,6 +1532,7 @@ void RXEndpoint::registerParameters()
   // keeps every existing index stable.
   registerParameter(&luaRxUid, rxUidCallback);
   registerParameter(&luaRxDiag);
+  registerParameter(&luaBindState);
 }
 
 static void updateBindModeLabel()
@@ -1562,6 +1604,7 @@ void RXEndpoint::updateParameters()
   updateBindModeLabel();
   formatRxUidString(config.GetUID(), rxUidString);
   updateRxDiagString();
+  updateBindStateString();
 
   if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
   {
