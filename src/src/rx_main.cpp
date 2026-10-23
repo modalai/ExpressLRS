@@ -2416,11 +2416,29 @@ void UpdateUID(uint8_t * newID)
 {
     DBGLN("GOT NEW ID: 0x%x", newID[5]);
     //config.SetIsBound(true);
+    LostConnection(false);
     memcpy(UID, newID, UID_LEN);
     devicesTriggerEvent();
     config.SetUID(UID);
     config.Commit();
+    // The CRC seed and the hop sequence come from the UID. Without recomputing them the receiver
+    // kept the old UID's until a reboot: a UID written over CRSF (voxl-elrs, the Lua UID field)
+    // did not link to the new TX, and an unbind (UID FF..FF) left the old link working. Binding
+    // mode uses its own CRC seed and channel, so it is left alone there (4.x UpdateUID() does the
+    // same).
+    if (!InBindingMode)
+    {
+        OtaUpdateCrcInitFromUid();
+        FHSSrandomiseFHSSsequence(uidMacSeedGet());
+    }
     LostConnection(true);
+
+    // An unbound receiver boots into binding mode, which never cycles rates or follows the hop
+    // sequence, so a bound UID written there must also end binding mode (4.x e1bc75ce).
+    if (InBindingMode && UID_IS_BOUND(UID))
+    {
+        ExitBindingMode();
+    }
 
     // todo should this be called since it disables_irq and not always needed?
     // reset_into_bootloader();
