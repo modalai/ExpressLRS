@@ -1104,6 +1104,34 @@ static uint32_t psuedo_rand(uint32_t x) {
     return x;
 }
 
+// Switch the link to a new UID and save it (same as 4.x UpdateUID()). The RF timer is
+// stopped first: the config commit erases flash, and the CRC seed, hop sequence and rate
+// all change under it. Binding mode ends, since binding only sends the old UID. A timer
+// that was already stopped (no handset) stays stopped.
+void UpdateUID(uint8_t *newID)
+{
+  const bool timerWasRunning = hwTimer::running;
+  hwTimer::stop();
+  while (busyTransmitting);
+
+  if (InBindingMode)
+  {
+    MspSender.ResetState();
+    InBindingMode = false;
+  }
+  memcpy(UID, newID, UID_LEN);
+  config.SetUID(UID);
+  config.Commit();
+  OtaUpdateCrcInitFromUid();
+  FHSSrandomiseFHSSsequence(uidMacSeedGet());
+  SetRFLinkRate(config.GetRate(), true);
+  devicesTriggerEvent();
+  if (timerWasRunning)
+  {
+    hwTimer::resume();
+  }
+}
+
 void EnterUnbindMode()
 {
   DBGLN("Entering TX unbind mode");
@@ -1112,16 +1140,15 @@ void EnterUnbindMode()
   seed = psuedo_rand(seed);
   uint32_t lo = psuedo_rand(seed);
   uint32_t hi = psuedo_rand(lo);
-  UID[0] = (lo >> 24) & 0xFF;
-  UID[1] = (lo >> 16) & 0xFF;
-  UID[2] = (lo >>  8) & 0xFF;
-  UID[3] =  lo        & 0xFF;
-  UID[4] = (hi >> 24) & 0xFF;
-  UID[5] = (hi >> 16) & 0xFF;
-  config.SetUID(UID);
-  config.Commit();
-  OtaUpdateCrcInitFromUid();
-  FHSSrandomiseFHSSsequence(uidMacSeedGet());
+  uint8_t newUid[UID_LEN] = {
+    (uint8_t)(lo >> 24),
+    (uint8_t)(lo >> 16),
+    (uint8_t)(lo >> 8),
+    (uint8_t)lo,
+    (uint8_t)(hi >> 24),
+    (uint8_t)(hi >> 16)
+  };
+  UpdateUID(newUid);
 }
 
 void ProcessMSPPacket(uint32_t now, mspPacket_t *packet)

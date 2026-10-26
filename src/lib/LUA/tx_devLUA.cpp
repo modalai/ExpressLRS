@@ -207,9 +207,9 @@ static struct luaItem_string luaELRSversion = {
 
 static char luaTxUidString[(UID_LEN * 2) + 1] = {0};
 static struct luaItem_string luaTxUid = {
-    {"UID", CRSF_INFO},
+    {"UID", CRSF_STRING},
     luaTxUidString,
-    0  // CRSF_INFO type, no max length needed
+    UID_LEN * 2  // 2 hex chars per byte
 };
 
 //---------------------------- WiFi -----------------------------
@@ -380,6 +380,34 @@ static void luadevUpdateUID()
   }
   luaTxUidString[UID_LEN * 2] = '\0';
   setLuaStringValue(&luaTxUid, luaTxUidString);
+}
+
+static bool parseUidString(const char *text, uint8_t *outUid)
+{
+  for (uint8_t i = 0; i < UID_LEN * 2; ++i)
+  {
+    const char c = text[i];
+    uint8_t nibble;
+    if (c >= '0' && c <= '9') nibble = c - '0';
+    else if (c >= 'A' && c <= 'F') nibble = c - 'A' + 10;
+    else if (c >= 'a' && c <= 'f') nibble = c - 'a' + 10;
+    else return false;
+    if ((i & 1) == 0) outUid[i / 2] = nibble << 4;
+    else outUid[i / 2] |= nibble;
+  }
+  return text[UID_LEN * 2] == '\0';
+}
+
+// A UID written as 12 hex chars replaces the TX's UID (and saves it), like Unbind does
+// with a random one. Anything else, or an unbound UID, puts the current UID back.
+static void luahandUid(struct luaPropertiesCommon *item, uint8_t arg)
+{
+  uint8_t newUid[UID_LEN];
+  if (parseUidString(luaTxUidString, newUid) && UID_IS_BOUND(newUid) && memcmp(newUid, UID, UID_LEN) != 0)
+  {
+    UpdateUID(newUid);
+  }
+  luadevUpdateUID();
 }
 
 static void luadevUpdateModelID() {
@@ -719,7 +747,7 @@ static void registerLuaParameters()
   }
   strlcat(version_domain, FHSSconfig->domain, sizeof(version_domain));
   registerLUAParameter(&luaELRSversion);
-  registerLUAParameter(&luaTxUid);
+  registerLUAParameter(&luaTxUid, &luahandUid);
 
   if (HAS_RADIO) {
 
