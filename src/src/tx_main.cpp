@@ -1151,6 +1151,18 @@ void EnterUnbindMode()
   UpdateUID(newUid);
 }
 
+#if defined(M0139)
+void ResetConfigKeepUid()
+{
+  // Stop transmitting while the EEPROM is written, as UpdateUID() does, then reboot
+  // so the radio, power and handset link all start on the defaults
+  hwTimer::stop();
+  while (busyTransmitting);
+  config.SetDefaultsKeepUid();
+  NVIC_SystemReset();
+}
+#endif
+
 void ProcessMSPPacket(uint32_t now, mspPacket_t *packet)
 {
 #if !defined(CRITICAL_FLASH)

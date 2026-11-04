@@ -2443,3 +2443,15 @@ void UpdateUID(uint8_t * newID)
     // todo should this be called since it disables_irq and not always needed?
     // reset_into_bootloader();
 }
+
+#if defined(M0139)
+void ResetConfigKeepUid()
+{
+    // Stop the RF timer while the EEPROM is written, as UpdateUID() does, then reboot
+    // so the serial port, outputs and radio all start on the defaults
+    LostConnection(false);
+    hwTimer::stop();
+    config.SetDefaultsKeepUid();
+    NVIC_SystemReset();
+}
+#endif

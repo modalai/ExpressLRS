@@ -1092,6 +1092,19 @@ TxConfig::SetDefaults(bool commit)
     m_modified = 0;
 }
 
+#if defined(M0139)
+void
+TxConfig::SetDefaultsKeepUid()
+{
+    uint8_t uid[UID_LEN];
+    memcpy(uid, m_config.uid, UID_LEN);
+    SetDefaults(false);
+    memcpy(m_config.uid, uid, UID_LEN);
+    m_modified = ALL_CHANGED;
+    Commit();
+}
+#endif
+
 /**
  * Sets ModelId used for subsequent per-model config gets
  * Returns: true if the model has changed
@@ -1837,6 +1850,23 @@ RxConfig::SetDefaults(bool commit)
         Commit();
     }
 }
+
+#if defined(M0139)
+void
+RxConfig::SetDefaultsKeepUid()
+{
+    // flash_discriminator goes with the UID: it records whether the flashed binding
+    // phrase has been copied in, and clearing it would let that phrase replace the UID
+    uint8_t uid[UID_LEN];
+    memcpy(uid, m_config.uid, UID_LEN);
+    const uint32_t flashDiscriminator = m_config.flash_discriminator;
+    SetDefaults(false);
+    memcpy(m_config.uid, uid, UID_LEN);
+    m_config.flash_discriminator = flashDiscriminator;
+    m_modified = true;
+    Commit();
+}
+#endif
 
 void
 RxConfig::SetStorageProvider(ELRS_EEPROM *eeprom)

@@ -194,6 +194,10 @@ public:
     void SetLinkMode(uint8_t linkMode);
     void SetModelMatch(bool modelMatch);
     void SetDefaults(bool commit);
+#if defined(M0139)
+    // SetDefaults() that keeps the UID, so the link partner stays bound, and commits
+    void SetDefaultsKeepUid();
+#endif
     void SetStorageProvider(ELRS_EEPROM *eeprom);
     void SetVtxBand(uint8_t vtxBand);
     void SetVtxChannel(uint8_t vtxChannel);
@@ -400,6 +404,10 @@ public:
     void SetPower(uint8_t power);
     void SetAntennaMode(uint8_t antennaMode);
     void SetDefaults(bool commit);
+#if defined(M0139)
+    // SetDefaults() that keeps the UID, so the link partner stays bound, and commits
+    void SetDefaultsKeepUid();
+#endif
     void SetStorageProvider(ELRS_EEPROM *eeprom);
     #if defined(GPIO_PIN_PWM_OUTPUTS)
     void SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, bool narrow);

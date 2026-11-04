@@ -325,6 +325,8 @@ bool isDualRadio();
 void EnterBindingModeSafely(); // defined in rx_main/tx_main
 void EnterUnbindMode();
 void UpdateUID(uint8_t * newID);
+// "Reset to defaults" Lua command: every setting but the UID back to its default, then reboot
+void ResetConfigKeepUid();
 
 #if defined(RADIO_LR1121)
 bool isSupportedRFRate(uint8_t index);

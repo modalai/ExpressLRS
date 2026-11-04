@@ -8,6 +8,7 @@
 #include "OTA.h"
 #include "FHSS.h"
 #include "helpers.h"
+#include "deferred.h"
 
 extern bool fhssLocked;
 extern bool fhssLockPending;
@@ -197,6 +198,15 @@ static struct luaItem_command luaUnbind = {
     STR_EMPTYSPACE
 };
 
+#if defined(M0139)
+// voxl-elrs finds this by name, so keep it
+static struct luaItem_command luaResetDefaults = {
+    {"Reset to defaults", CRSF_COMMAND},
+    lcsIdle, // step
+    STR_EMPTYSPACE
+};
+#endif
+
 static struct luaItem_string luaInfo = {
     {"Bad/Good", (crsf_value_type_e)(CRSF_INFO | CRSF_FIELD_ELRS_HIDDEN)},
     STR_EMPTYSPACE,
@@ -363,6 +373,7 @@ extern void ResetPower();
 extern uint8_t adjustPacketRateForBaud(uint8_t rate);
 extern void SetSyncSpam();
 extern void EnterUnbindMode();
+extern void ResetConfigKeepUid();
 extern bool RxWiFiReadyToSend;
 extern bool BackpackTelemReadyToSend;
 #if defined(USE_TX_BACKPACK)
@@ -554,6 +565,32 @@ static void luahandUnbind(struct luaPropertiesCommon *item, uint8_t arg)
   }
   sendLuaCommandResponse((struct luaItem_command *)item, lcsIdle, STR_EMPTYSPACE);
 }
+
+#if defined(M0139)
+static void luahandResetDefaults(struct luaPropertiesCommon *item, uint8_t arg)
+{
+  static bool resetting = false;
+  if (resetting)
+  {
+    // Polls until the reboot keep showing it running; the rebooted module answers idle
+    sendLuaCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+  }
+  else if (arg == lcsClick)
+  {
+    sendLuaCommandResponse(&luaResetDefaults, lcsAskConfirm, "Reset all but UID?");
+  }
+  else if (arg == lcsConfirmed)
+  {
+    resetting = true;
+    sendLuaCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+    deferExecutionMillis(200, ResetConfigKeepUid);
+  }
+  else
+  {
+    sendLuaCommandResponse(&luaResetDefaults, lcsIdle, STR_EMPTYSPACE);
+  }
+}
+#endif
 
 static void luahandSimpleSendCmd(struct luaPropertiesCommon *item, uint8_t arg)
 {
@@ -1000,6 +1037,10 @@ static void registerLuaParameters()
   #endif
 
   registerLUAParameter(&luaInfo);
+#if defined(M0139)
+  // Appended so every existing parameter index stays where it was
+  registerLUAParameter(&luaResetDefaults, &luahandResetDefaults);
+#endif
   registerLUAParameter(NULL);
 #if defined(M0139)
   LUA_FIELD_HIDE(luaWiFiFolder);

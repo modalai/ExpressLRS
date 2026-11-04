@@ -20,6 +20,7 @@ extern void reconfigureSerial1();
 extern bool BindingModeRequest;
 extern void EnterBindingModeSafely();
 extern void EnterUnbindMode();
+extern void ResetConfigKeepUid();
 
 static char modelString[] = "000";
 
@@ -755,6 +756,15 @@ static struct luaItem_command luaUnbindMode = {
     STR_EMPTYSPACE
 };
 
+#if defined(M0139)
+// voxl-elrs finds this by name, so keep it
+static struct luaItem_command luaResetDefaults = {
+    {"Reset to defaults", CRSF_COMMAND},
+    lcsIdle, // step
+    STR_EMPTYSPACE
+};
+#endif
+
 // Bind State: lets the FC side tell a receiver that is binding from one that has simply
 // lost the link. Both look the same on the wire (no link statistics, no RC frames), and
 // the LED pattern was the only other way to see it. The value strings are matched by
@@ -1356,6 +1366,31 @@ static void registerLuaParameters()
   registerLUAParameter(&luaCommitHash);
   // Appended so every existing parameter index stays where it was
   registerLUAParameter(&luaBindState);
+#if defined(M0139)
+  registerLUAParameter(&luaResetDefaults, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    static bool resetting = false;
+    if (resetting)
+    {
+      // Polls until the reboot keep showing it running; the rebooted receiver answers idle
+      sendLuaCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+    }
+    else if (arg == lcsClick)
+    {
+      sendLuaCommandResponse(&luaResetDefaults, lcsAskConfirm, "Reset all but UID?");
+    }
+    else if (arg == lcsConfirmed)
+    {
+      resetting = true;
+      sendLuaCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+      // Longer than Unbind's 200 ms: over the link the reply rides telemetry
+      deferExecutionMillis(500, ResetConfigKeepUid);
+    }
+    else
+    {
+      sendLuaCommandResponse(&luaResetDefaults, lcsIdle, STR_EMPTYSPACE);
+    }
+  });
+#endif
   registerLUAParameter(nullptr);
 }
 
