@@ -2132,6 +2132,18 @@ void resetConfigAndReboot()
 #endif
 }
 
+#if defined(M0139)
+void ResetConfigKeepUid()
+{
+    // Stop the RF timer while the EEPROM is written, as UpdateUID() does, then reboot
+    // so the serial port, outputs and radio all start on the defaults
+    LostConnection(false);
+    hwTimer::stop();
+    config.SetDefaultsKeepUid();
+    scheduleRebootTime(100);
+}
+#endif
+
 void setup()
 {
 #if defined(DEBUG_RTT)

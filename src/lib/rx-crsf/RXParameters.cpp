@@ -273,6 +273,13 @@ static commandParameter luaUnbindMode = {
     STR_EMPTYSPACE
 };
 
+// voxl-elrs finds this by name, so keep it
+static commandParameter luaResetDefaults = {
+    {"Reset to defaults", CRSF_COMMAND},
+    lcsIdle,
+    STR_EMPTYSPACE
+};
+
 static selectionParameter luaTlmPower = {
     {"Tlm Power", CRSF_TEXT_SELECTION},
     0,
@@ -704,6 +711,29 @@ void RXEndpoint::registerParameters()
     registerParameter(&luaCommitHash);
     // Appended so every existing parameter index stays where it was
     registerParameter(&luaBindState);
+    registerParameter(&luaResetDefaults, [this](propertiesCommon *, int32_t arg) {
+        static bool resetting = false;
+        if (resetting)
+        {
+            // Polls until the reboot keep showing it running; the rebooted receiver answers idle
+            sendCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+        }
+        else if (arg == lcsClick)
+        {
+            sendCommandResponse(&luaResetDefaults, lcsAskConfirm, "Reset all but UID?");
+        }
+        else if (arg == lcsConfirmed)
+        {
+            resetting = true;
+            sendCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+            // Longer than Unbind's 200 ms: over the link the reply rides telemetry
+            deferExecutionMillis(500, ResetConfigKeepUid);
+        }
+        else
+        {
+            sendCommandResponse(&luaResetDefaults, lcsIdle, STR_EMPTYSPACE);
+        }
+    });
 }
 
 void RXEndpoint::updateParameters()

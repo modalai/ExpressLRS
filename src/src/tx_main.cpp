@@ -1666,6 +1666,16 @@ void EnterUnbindMode()
   };
   UpdateUID(newUid);
 }
+
+void ResetConfigKeepUid()
+{
+  // Stop transmitting while the EEPROM is written, as UpdateUID() does, then reboot
+  // so the radio, power and handset link all start on the defaults
+  hwTimer::stop();
+  while (busyTransmitting);
+  config.SetDefaultsKeepUid();
+  scheduleRebootTime(100);
+}
 #endif
 
 

@@ -12,6 +12,8 @@
 void EnterBindingModeSafely();
 void EnterUnbindMode();
 void UpdateUID(const uint8_t *newUid);
+// "Reset to defaults" parameter: every setting but the UID back to its default, then reboot
+void ResetConfigKeepUid();
 void scheduleRebootTime(unsigned long inMs);
 
 /***

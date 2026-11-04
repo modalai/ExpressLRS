@@ -224,6 +224,13 @@ static commandParameter luaUnbind = {
     lcsIdle,
     STR_EMPTYSPACE
 };
+
+// voxl-elrs finds this by name, so keep it
+static commandParameter luaResetDefaults = {
+    {"Reset to defaults", CRSF_COMMAND},
+    lcsIdle,
+    STR_EMPTYSPACE
+};
 #endif
 
 #if defined(CUSTOM_DOMAIN_ENABLE)
@@ -1118,6 +1125,32 @@ void TXModuleEndpoint::registerParameters()
   #if defined(PLATFORM_ESP32)
   registerParameter(&luaBLEJoystick, wifiBleCallback);
   #endif
+#endif
+
+#if defined(M0139)
+  // Appended so every existing parameter index stays where it was
+  registerParameter(&luaResetDefaults, [this](propertiesCommon *item, int32_t arg) {
+    static bool resetting = false;
+    if (resetting)
+    {
+      // Polls until the reboot keep showing it running; the rebooted module answers idle
+      sendCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+    }
+    else if (arg == lcsClick)
+    {
+      sendCommandResponse(&luaResetDefaults, lcsAskConfirm, "Reset all but UID?");
+    }
+    else if (arg == lcsConfirmed)
+    {
+      resetting = true;
+      sendCommandResponse(&luaResetDefaults, lcsExecuting, "Resetting...");
+      deferExecutionMillis(200, ResetConfigKeepUid);
+    }
+    else
+    {
+      sendCommandResponse(&luaResetDefaults, lcsIdle, STR_EMPTYSPACE);
+    }
+  });
 #endif
 }
 
