@@ -133,19 +133,23 @@ static selectionParameter luaCustomDomainEnable = {
 
 static int16Parameter luaCustomDomainStart = {
     {"Start MHz", CRSF_UINT16},
-    {{htobe16(863), htobe16(410), htobe16(1019)}},
+    {{htobe16(CUSTOM_DOMAIN_DEFAULT_START_MHZ),
+      htobe16(CUSTOM_DOMAIN_LOW_BAND_START_MHZ),
+      htobe16(CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ - 1)}},
     "MHz"
 };
 
 static int16Parameter luaCustomDomainEnd = {
     {"End MHz", CRSF_UINT16},
-    {{htobe16(983), htobe16(411), htobe16(1020)}},
+    {{htobe16(CUSTOM_DOMAIN_DEFAULT_STOP_MHZ),
+      htobe16(CUSTOM_DOMAIN_LOW_BAND_START_MHZ + 1),
+      htobe16(CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ)}},
     "MHz"
 };
 
 static int8Parameter luaCustomDomainChannels = {
     {"Channels", CRSF_UINT8},
-    {{80, 2, 255}},
+    {{CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT, CUSTOM_DOMAIN_MIN_CHANNELS, 255}},
     "ch"
 };
 
@@ -1052,19 +1056,23 @@ static selectionParameter luaCustomDomainEnable = {
 
 static int16Parameter luaCustomDomainStart = {
     {"Start MHz", CRSF_UINT16},
-    {{htobe16(863), htobe16(410), htobe16(1019)}},
+    {{htobe16(CUSTOM_DOMAIN_DEFAULT_START_MHZ),
+      htobe16(CUSTOM_DOMAIN_LOW_BAND_START_MHZ),
+      htobe16(CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ - 1)}},
     "MHz"
 };
 
 static int16Parameter luaCustomDomainEnd = {
     {"End MHz", CRSF_UINT16},
-    {{htobe16(983), htobe16(411), htobe16(1020)}},
+    {{htobe16(CUSTOM_DOMAIN_DEFAULT_STOP_MHZ),
+      htobe16(CUSTOM_DOMAIN_LOW_BAND_START_MHZ + 1),
+      htobe16(CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ)}},
     "MHz"
 };
 
 static int8Parameter luaCustomDomainChannels = {
     {"Channels", CRSF_UINT8},
-    {{80, 2, 255}},
+    {{CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT, CUSTOM_DOMAIN_MIN_CHANNELS, 255}},
     "ch"
 };
 #endif
