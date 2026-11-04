@@ -6,6 +6,21 @@
 #include "common.h"
 #include "FHSS.h"
 
+#if defined(CUSTOM_DOMAIN_ENABLE)
+// Custom domain band limits and factory default. The TX and RX Lua parameters
+// use these too, so the defaults and ranges they show match what config stores.
+// The default (863-983 MHz, 80 channels) matches the voxl-elrs "Custom Domain"
+// preset and 4.x; it is seeded on every config reset but left disabled.
+constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_START_MHZ = 410;
+constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ = 525;
+constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_START_MHZ = 862;
+constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ = 1020;
+constexpr uint8_t CUSTOM_DOMAIN_MIN_CHANNELS = 2;
+constexpr uint16_t CUSTOM_DOMAIN_DEFAULT_START_MHZ = 863;
+constexpr uint16_t CUSTOM_DOMAIN_DEFAULT_STOP_MHZ = 983;
+constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT = 80;
+#endif
+
 #if defined(PLATFORM_ESP32)
 #include <nvs_flash.h>
 #include <nvs.h>

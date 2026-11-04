@@ -103,11 +103,7 @@ static void ModelV6toV7(v6_model_config_t const * const v6, model_config_t * con
 namespace {
 constexpr uint8_t CUSTOM_DOMAIN_HIGH_BAND = 0;
 constexpr uint8_t CUSTOM_DOMAIN_LOW_BAND = 1;
-constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_START_MHZ = 862;
-constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ = 1020;
-constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_START_MHZ = 410;
-constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ = 525;
-constexpr uint8_t CUSTOM_DOMAIN_MIN_CHANNELS = 2;
+// Band limits and the factory default are in config.h, shared with the Lua parameters.
 constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_CHANNELS = 20;
 
 static uint16_t clampCustomDomainMHz(uint16_t value, uint16_t minValue, uint16_t maxValue)
@@ -222,17 +218,15 @@ static uint16_t customDomainRegToMHz(uint32_t regFreq)
 #endif
 
 template <typename TConfig>
-static void setCustomDomainFromConfig(TConfig &cfg, const fhss_config_t &domain)
+static void setCustomDomainDefaults(TConfig &cfg)
 {
-    const uint16_t startMHz = customDomainRegToMHz(domain.freq_start);
-    const uint16_t endMHz = customDomainRegToMHz(domain.freq_stop);
-    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint8_t band = customDomainBandFromMHz(CUSTOM_DOMAIN_DEFAULT_START_MHZ);
     const uint16_t bandStartMHz = customDomainBandStartMHz(band);
 
     cfg.custom_domain_band = band;
-    cfg.custom_domain_start = startMHz - bandStartMHz;
-    cfg.custom_domain_end = endMHz - bandStartMHz;
-    cfg.custom_domain_n_channels = domain.freq_count;
+    cfg.custom_domain_start = CUSTOM_DOMAIN_DEFAULT_START_MHZ - bandStartMHz;
+    cfg.custom_domain_end = CUSTOM_DOMAIN_DEFAULT_STOP_MHZ - bandStartMHz;
+    cfg.custom_domain_n_channels = CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT;
     cfg.custom_domain_enable = false;
     normalizeCustomDomain(cfg);
 }
@@ -1027,7 +1021,7 @@ TxConfig::SetDefaults(bool commit)
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    setCustomDomainFromConfig(m_config, FHSSgetInitialDomain());
+    setCustomDomainDefaults(m_config);
 #endif
 
     m_config.version = TX_CONFIG_VERSION | TX_CONFIG_MAGIC;
@@ -1129,11 +1123,7 @@ TxConfig::SetModelId(uint8_t modelId)
 namespace {
 constexpr uint8_t CUSTOM_DOMAIN_HIGH_BAND = 0;
 constexpr uint8_t CUSTOM_DOMAIN_LOW_BAND = 1;
-constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_START_MHZ = 862;
-constexpr uint16_t CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ = 1020;
-constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_START_MHZ = 410;
-constexpr uint16_t CUSTOM_DOMAIN_LOW_BAND_STOP_MHZ = 525;
-constexpr uint8_t CUSTOM_DOMAIN_MIN_CHANNELS = 2;
+// Band limits and the factory default are in config.h, shared with the Lua parameters.
 constexpr uint8_t CUSTOM_DOMAIN_DEFAULT_CHANNELS = 20;
 
 static uint16_t clampCustomDomainMHz(uint16_t value, uint16_t minValue, uint16_t maxValue)
@@ -1248,17 +1238,15 @@ static uint16_t customDomainRegToMHz(uint32_t regFreq)
 #endif
 
 template <typename TConfig>
-static void setCustomDomainFromConfig(TConfig &cfg, const fhss_config_t &domain)
+static void setCustomDomainDefaults(TConfig &cfg)
 {
-    const uint16_t startMHz = customDomainRegToMHz(domain.freq_start);
-    const uint16_t endMHz = customDomainRegToMHz(domain.freq_stop);
-    const uint8_t band = customDomainBandFromMHz(startMHz);
+    const uint8_t band = customDomainBandFromMHz(CUSTOM_DOMAIN_DEFAULT_START_MHZ);
     const uint16_t bandStartMHz = customDomainBandStartMHz(band);
 
     cfg.custom_domain_band = band;
-    cfg.custom_domain_start = startMHz - bandStartMHz;
-    cfg.custom_domain_end = endMHz - bandStartMHz;
-    cfg.custom_domain_n_channels = domain.freq_count;
+    cfg.custom_domain_start = CUSTOM_DOMAIN_DEFAULT_START_MHZ - bandStartMHz;
+    cfg.custom_domain_end = CUSTOM_DOMAIN_DEFAULT_STOP_MHZ - bandStartMHz;
+    cfg.custom_domain_n_channels = CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT;
     cfg.custom_domain_enable = false;
     normalizeCustomDomain(cfg);
 }
@@ -1789,7 +1777,7 @@ RxConfig::SetDefaults(bool commit)
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 #if defined(CUSTOM_DOMAIN_ENABLE)
-    setCustomDomainFromConfig(m_config, FHSSgetInitialDomain());
+    setCustomDomainDefaults(m_config);
 #endif
     // All-0xFF uid is treated as bound but matches no TX, keeping RX inert until explicitly bound
     // warning this will reset bind keys on eeprom updates on FW updates that increment the eeprom version.

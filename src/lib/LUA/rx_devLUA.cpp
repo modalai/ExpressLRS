@@ -129,19 +129,23 @@ static struct luaItem_selection luaCustomDomainEnable = {
 
 static struct luaItem_int16 luaCustomDomainStart = {
     {"Start MHz", CRSF_UINT16},
-    {{915, 410, 1019}},
+    {{CUSTOM_DOMAIN_DEFAULT_START_MHZ,
+      CUSTOM_DOMAIN_LOW_BAND_START_MHZ,
+      CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ - 1}},
     "MHz"
 };
 
 static struct luaItem_int16 luaCustomDomainEnd = {
     {"End MHz", CRSF_UINT16},
-    {{928, 411, 1020}},
+    {{CUSTOM_DOMAIN_DEFAULT_STOP_MHZ,
+      CUSTOM_DOMAIN_LOW_BAND_START_MHZ + 1,
+      CUSTOM_DOMAIN_HIGH_BAND_STOP_MHZ}},
     "MHz"
 };
 
 static struct luaItem_int8 luaCustomDomainChannels = {
     {"Channels", CRSF_UINT8},
-    {{20, 2, 255}},
+    {{CUSTOM_DOMAIN_DEFAULT_FREQ_COUNT, CUSTOM_DOMAIN_MIN_CHANNELS, 255}},
     "ch"
 };
 #endif
