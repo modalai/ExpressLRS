@@ -897,11 +897,10 @@ void TXModuleEndpoint::registerParameters()
     registerParameter(&luaBind, sendCallback);
 #if defined(M0139)
     registerParameter(&luaUnbind, [this](propertiesCommon *item, int32_t arg) {
+      // Runs on click, as every receiver's Unbind and the 3.5.3 transmitter's do. The
+      // voxl-elrs CLI cancels a command that asks for confirmation, so the question
+      // belongs to the UI: the voxl-elrs frontend and ModalTX ask before they send it.
       if (arg == lcsClick)
-      {
-        sendCommandResponse(&luaUnbind, lcsAskConfirm, "Generate new UID?");
-      }
-      else if (arg == lcsConfirmed)
       {
         sendCommandResponse(&luaUnbind, lcsExecuting, "Generating...");
         deferExecutionMillis(200, EnterUnbindMode);
